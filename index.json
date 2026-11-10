@@ -1,0 +1,14 @@
+[
+  {
+    "Id": "text-counter",
+    "Name": "文本工具箱",
+    "Author": "Banan1cee",
+    "Version": "1.0.0",
+    "MinAppVersion": "4.1.0",
+    "Description": "统计输入文本的 UTF-8 字节数。适合检查文本体积。",
+    "ResultLabel": "UTF-8 字节数",
+    "Api": 1,
+    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/text-counter-1.0.0.zip",
+    "Sha256": "ec4beaca9a16fb8d6c3c4fdfb702e3e99a483d5dc94b4f66b3e58cf7cb963e55"
+  }
+]

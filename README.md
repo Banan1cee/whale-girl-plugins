@@ -1,2 +1,12 @@
-# whale-girl-plugins
-Whale Girl plugin marketplace and developer examples
+# 鲸鲸插件市场
+
+鲸鲸启动器从 `index.json` 读取已审核目录。普通用户在鲸鲸的「插件市场」安装插件。作者可以提交 PR 申请上架，合并由维护者审核。
+
+## 制作功能插件
+
+1. 复制 [示例清单](examples/plugin.json)，修改 Id、名称、作者、版本、兼容版本和结果标签。Id 使用小写英文字母、数字和短横线。
+2. 编译 WebAssembly 程序。第一版接口见 [文本工具箱源码](examples/text-counter.wat)。插件导出 `run() -> i32`，可调用 `whale.input_size() -> i32` 和 `whale.input_byte(index: i32) -> i32`。输入是 UTF-8，越界读取返回 -1。鲸鲸显示返回整数和清单中的结果标签。
+3. ZIP 根目录放 `plugin.json` 和 `plugin.wasm` 两个文件。无需安装脚本。ZIP 上限 1 MiB，Wasm 上限 512 KiB。
+4. 用鲸鲸的「从本地安装」验证。投稿时提交源代码链接、固定版本的 ZIP 下载地址和 SHA-256，维护者审核后加入目录。每次更新增加版本号，保留已有版本的包。
+ 
+插件只能读取用户在该工具页面输入的文字。第一版没有联网、读微信或代发消息接口。发现问题请提交 Issue，并注明插件 ID 和版本。
