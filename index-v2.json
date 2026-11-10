@@ -1,0 +1,16 @@
+[
+  {
+    "Id": "daily-digest",
+    "Name": "日报便签",
+    "Author": "Banan1cee",
+    "Version": "1.0.0",
+    "MinAppVersion": "4.1.0",
+    "Description": "把「消息汇总」生成的日报整理成可直接粘贴的纯文本：标题变【】，列表变·，去掉 Markdown 符号，压掉多余空行。",
+    "ResultLabel": "可粘贴的日报",
+    "Api": 2,
+    "Kind": "tool",
+    "HostAction": "chat.summary",
+    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/daily-digest-1.0.0.zip",
+    "Sha256": "6430638dc624fd2b2693218c4dda5433c7cd8ced1f39270bd0db96a48e45f878"
+  }
+]
