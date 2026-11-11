@@ -12,8 +12,11 @@ ROOT = Path(__file__).resolve().parent
 PREFIX = 'https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/'
 HOSTS = {'raw.githubusercontent.com', 'github.com', 'release-assets.githubusercontent.com',
          'objects.githubusercontent.com'}
-CATALOGS = {'index.json': 1, 'index-v2.json': 2}
+CATALOGS = {'index.json': 1, 'index-v2.json': 2, 'index-v3.json': 3}
 CATALOG_ONLY = {'Download', 'Sha256', 'DiscussionIssue'}
+MESSAGE_HOOKS = ('chat.received', 'chat.pre_reply', 'chat.prompt', 'chat.generate',
+                 'chat.reply', 'chat.before_send', 'chat.dispatched')
+MESSAGE_PERMISSIONS = ('chat.history', 'model.prompt')
 VERSION = re.compile(r'\d+\.\d+\.\d+(\.\d+)?', re.ASCII)
 LIMIT = 1024 * 1024
 
@@ -48,13 +51,34 @@ def package_bytes(root, entry):
         return response.read(LIMIT + 1)
 
 
+def check_capabilities(entry, api):
+    """按目录校验 Api / Kind / HostAction（Api 3 还校验 Hooks 与 Permissions）。"""
+    check(type(entry['Api']) is int and entry['Api'] == api, 'invalid Api for this catalog')
+    if api == 3:
+        check(entry.get('Kind') == 'message', 'invalid Kind for this catalog')
+        check(entry.get('HostAction') is None, 'invalid HostAction for this catalog')
+        hooks = entry.get('Hooks')
+        check(isinstance(hooks, list) and 1 <= len(hooks) <= 7
+              and len(set(hooks)) == len(hooks)
+              and all(hook in MESSAGE_HOOKS for hook in hooks), 'invalid Hooks')
+        permissions = entry.get('Permissions')
+        check(isinstance(permissions, list) and len(permissions) <= 2
+              and len(set(permissions)) == len(permissions)
+              and all(permission in MESSAGE_PERMISSIONS for permission in permissions),
+              'invalid Permissions')
+        check(tuple(map(int, entry['MinAppVersion'].split('.'))) >= (4, 1, 0),
+              'Api 3 requires MinAppVersion >= 4.1.0')
+    else:
+        check(entry.get('Kind', 'tool') == 'tool'
+              and entry.get('HostAction') in ((None,) if api == 1 else (None, 'chat.summary')),
+              'invalid Api, Kind or HostAction for this catalog')
+
+
 def check_entry(root, entry, api, seen):
     plugin_id = entry['Id']
     check(re.fullmatch(r'[a-z][a-z0-9-]{0,47}', plugin_id)
           and not re.fullmatch(r'con|prn|aux|nul|com[1-9]|lpt[1-9]', plugin_id), 'invalid Id')
-    check(type(entry['Api']) is int and entry['Api'] == api and entry.get('Kind', 'tool') == 'tool'
-          and entry.get('HostAction') in ((None,) if api == 1 else (None, 'chat.summary')),
-          'invalid Api, Kind or HostAction for this catalog')
+    check_capabilities(entry, api)
     for field in ('Name', 'Author', 'ResultLabel'):
         check(isinstance(entry.get(field), str) and 0 < len(entry[field].strip()) <= 80,
               f'invalid {field}')
