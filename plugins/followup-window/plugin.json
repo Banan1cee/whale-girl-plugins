@@ -1,0 +1,13 @@
+{
+  "Id": "followup-window",
+  "Name": "接话窗口",
+  "Author": "Banan1cee",
+  "Version": "1.0.0",
+  "MinAppVersion": "4.1.0",
+  "Description": "她回完一句后，只对刚回的那个人开一段接话窗口：最多再顺接 3 句、180 秒内有效；别人一插话立刻收口，纯捧场、叫别人、超窗口都不接。替代「被 @ 一次就谁说话都回」。",
+  "ResultLabel": "接话判定",
+  "Api": 3,
+  "Kind": "message",
+  "Hooks": ["chat.pre_reply", "chat.reply"],
+  "Permissions": []
+}
