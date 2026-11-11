@@ -30,3 +30,13 @@
 ## 可以直接复制给 DSH
 
 > 按鲸鲸插件市场的 AGENTS.md 制作并上架这个功能。把实现放在独立插件里，所有配置和操作放在插件卡片的「设置」。先核对目标版本支持的接口，再交付源码、可独立安装的 ZIP、SHA-256 和测试结果。上架 PR 只发到 Banan1cee/whale-girl-plugins 的 main。缺宿主接口就停在插件草稿并列出缺口，未经我另行明确授权，不改鲸鲸主程序，也不给主仓库发 PR。
+
+## Api 3 消息插件开发版
+
+鲸鲸 4.1.0 本地开发版正在接入 Api 3，清单 Kind 填 message。它提供 chat.received、chat.pre_reply、chat.prompt、chat.generate、chat.reply、chat.before_send 和 chat.dispatched 七个扩展点，插件可保存独立会话状态。
+
+所有配置和操作仍放在插件卡片的「设置」。启用时确认持续参与消息处理，停用撤销授权，更新后重新启用。chat.history 和 model.prompt 分别声明，分别允许读取最近 12 条会话消息及读取、替换本轮系统提示词。
+
+先使用具备这些接口的本地开发版试装。同为 4.1.0 的旧客户端不一定支持 Api 3，需实际核对接口。公开上架仍需正式客户端发布，并在独立的 index-v3.json 接入市场 CI。当前不能往 index.json 或 index-v2.json 混入 Api 3 条目。
+
+定时任务、跨会话主动发送、自定义模型服务调用和语音控制尚未实现。chat.dispatched 表示网关提交结果，不能据此声称微信已经送达。完整输入输出协议见宿主仓库的 docs/插件消息流程Api3.md。
