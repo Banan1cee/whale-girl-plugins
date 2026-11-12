@@ -31,7 +31,7 @@
 
 1. 按 [README 的打包规则](README.md#制作功能插件) 交付独立安装 ZIP。准备可审核的源码链接和构建步骤，列出插件 ID、版本、最低鲸鲸版本、所用 API 及权限。
 2. 用申报的最低兼容版本从本地安装 ZIP，验证启用、从卡片打开设置、运行、停用和卸载。需要授权时也测试拒绝。记录实测版本和结果。
-3. 投稿包含目录条目、固定版本的 HTTPS 下载地址及 ZIP 的 SHA-256。市场托管的包放在 `packages/<id>-<version>.zip`。目录元数据应与包内清单一致。更新时提升版本号，保留已发布的版本包。提交前在市场仓库运行 `python validate.py`，两个目录的 API、下载、哈希、ZIP 和清单都须通过检查。
+3. PR 只提交两处：`plugins/<id>/plugin.json`（源码可放同目录）和 `packages/<id>-<version>.zip`。目录条目、下载地址和 SHA-256 由 `scripts/build-index.js` 在合并后自动生成，**不要手改 `index*.json`**（多人同时投稿也不会冲突）。更新时提升版本号并保留已发布的旧包。提交前可本地自检：`node scripts/build-index.js --out <临时目录>`，再跑 `python validate.py`。
 4. 只向 `Banan1cee/whale-girl-plugins:main` 提交上架 PR。PR 填写功能、源码、兼容版本、权限和试装结果。允许提前审查。支持所需能力的正式客户端可下载、同一份 ZIP 在正式客户端试装通过且对应目录 CI 通过后，才合并插件条目。同日上线时先发客户端。
 
 ## 可以直接复制给 DSH
