@@ -17,7 +17,30 @@
 1. 复制 [示例清单](examples/plugin.json)，修改 Id、名称、作者、版本、兼容版本和结果标签。Id 使用小写英文字母、数字和短横线。
 2. 编译 WebAssembly 程序。第一版接口见 [文本工具箱源码](examples/text-counter.wat)。插件导出 `run() -> i32`，可调用 `whale.input_size() -> i32` 和 `whale.input_byte(index: i32) -> i32`。输入是 UTF-8，越界读取返回 -1。鲸鲸显示返回整数和清单中的结果标签。
 3. ZIP 根目录放 `plugin.json` 和 `plugin.wasm` 两个文件。无需安装脚本。ZIP 上限 1 MiB，Wasm 上限 512 KiB。
-4. 用鲸鲸的「从本地安装」验证。投稿时提交源代码链接、固定版本的 GitHub HTTPS ZIP 下载地址和 SHA-256，维护者审核后加入目录。每次更新增加版本号，保留已有版本的包。
+4. 用鲸鲸的「从本地安装」验证。
+
+## 投稿：只加两个路径，目录自动生成
+
+**投稿不需要改 `index*.json`。** 一个 PR 只放这两样：
+
+```
+plugins/<id>/plugin.json                 插件清单（源码可放在同一目录）
+packages/<id>-<version>.zip              固定版本的安装包
+```
+
+合并到 main 后，`index` 工作流会运行 `node scripts/build-index.js`，按清单里的 `Api`/`Kind`
+把条目写进对应的 `index.json` / `index-v2.json` / `index-v3.json` / `index-personas.json`，
+并计算 SHA-256。作者不需要手写下载地址和哈希，也不会再因为同时改同一个 JSON 而冲突。
+
+本地预览生成结果：
+
+```bash
+node scripts/build-index.js --out /tmp/market-preview   # 写到你指定的目录
+node scripts/build-index.js --check                     # 检查已提交目录是否和源码同步
+```
+
+Api 3 消息插件仍需 `provenance/<id>-<version>.json`，并在 PR 里通过 `security` 工作流的虚拟机检测；
+人格预设只做静态格式检查。检测细节见 [安全检测指南](security/README.md)。
 
 Api 1 工具只能读取用户在该工具页面输入的文字。Wasm 没有联网、读取微信或代发消息接口。Api 2 支持 UTF-8 文本输出，也可声明 `HostAction: chat.summary`，由兼容宿主在用户按次确认后提供汇总结果。兼容测试版可本地试装，公开上架前须按 [协作规则](AGENTS.md) 核对正式客户端和 CI。发现问题请提交 Issue，并注明插件 ID 和版本。
 
