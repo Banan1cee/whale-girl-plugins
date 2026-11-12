@@ -1,6 +1,20 @@
 # 鲸鲸插件市场
 
-鲸鲸启动器从 `index.json` 读取 Api 1 工具，兼容的客户端从 `index-v2.json` 读取 Api 2 工具。普通用户在鲸鲸的「插件市场」安装插件。作者可以提交 PR 申请上架，合并由维护者审核。
+鲸鲸启动器从 `index.json` 读取 Api 1 工具，兼容的客户端从 `index-v2.json` 读取 Api 2 工具，Api 3 消息插件走 `index-v3.json`。
+
+**上传通道现在开放**：任何作者都可以按本仓库流程投稿，4.1 客户端正式发布前也先收录。条目、下载地址和 SHA-256 由 CI 自动生成，不需要手改目录、不需要签名。
+
+## 新手入口：先看这五样
+
+| 想知道 | 去哪看 |
+| --- | --- |
+| 能做什么、清单字段怎么填 | [宿主仓库·插件作者入门](https://github.com/Banan1cee/whale_girl/blob/main/docs/插件作者入门.md) |
+| Api 1/2 接口与最小示例 | 本仓库 [`examples/`](examples/) |
+| Api 3 消息插件协议（7 个扩展点、输入 JSON、状态） | [插件消息流程Api3.md](https://github.com/Banan1cee/whale_girl/blob/main/docs/插件消息流程Api3.md) |
+| 改几行就能跑通的 Api 3 模板 | [`examples/api3-echo/`](examples/api3-echo/) |
+| 分级检测、溯源与代交 | [`security/README.md`](security/README.md) |
+
+> **客户端状态**：插件市场从 4.1.0 开始提供，4.1 还没公开发布，但**投稿照收**——合并后条目立即进目录，等 4.1 发布用户就能在启动器里看到并安装。开发期可以用开发版客户端的「从本地安装」先验证同一个 ZIP；新手建议直接复制 `examples/api3-echo/` 改成自己的。
 
 ## 投稿前先读
 

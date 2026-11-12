@@ -1,5 +1,7 @@
 # 插件分级检测与溯源
 
+> **上传通道已开放，先收录后可用。** 4.1 客户端还没公开发布，但投稿照收：合并后条目立即进目录，用户装到支持该 Api 的客户端即可安装。Api 3 每版本仍须过 `security.yml` 的虚拟机检测；它是否已成为 main 的必需检查，以仓库分支保护设置为准。
+
 ## 普通作者怎么投稿
 
 1. 人格预设 ZIP 只放 `plugin.json` 与 `persona.json`，`Api: 1`、`Kind: persona`，进入 `index-personas.json`。正文只允许 `customPrompt`。不需要运行测试、GitHub 实名认证或额外审核材料；也可直接本地分享 ZIP。

@@ -1,0 +1,13 @@
+{
+  "Id": "api3-echo",
+  "Name": "消息插件模板",
+  "Author": "你的名字",
+  "Version": "1.0.0",
+  "MinAppVersion": "4.1.0",
+  "Description": "最小 Api 3 模板：在 chat.pre_reply 返回 {\"action\":\"pass\"}，改一行就能换成自己的判定。",
+  "ResultLabel": "判定结果",
+  "Api": 3,
+  "Kind": "message",
+  "Hooks": ["chat.pre_reply"],
+  "Permissions": []
+}
