@@ -1,0 +1,46 @@
+name: security-selftest
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  tests:
+    name: 安全检测器回归
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: 检测器对抗回归
+        env:
+          PYTHONUTF8: '1'
+        run: python -m unittest discover -s security -p 'test_*.py' -v
+      - name: 新流程端到端试跑（开发验证，不签署）
+        shell: pwsh
+        env:
+          AUDIT_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          AUDIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          AUDIT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          GH_READ_TOKEN: ${{ github.token }}
+          PYTHONUTF8: '1'
+        run: |
+          $argsList = @('security/audit.py', '--repo', $env:AUDIT_REPO, '--ref', $env:AUDIT_SHA,
+            '--output', "$env:RUNNER_TEMP/security-preview")
+          if ($env:AUDIT_BASE) { $argsList += @('--base', $env:AUDIT_BASE) }
+          python @argsList
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-preview-${{ github.run_id }}
+          path: ${{ runner.temp }}/security-preview/
+          if-no-files-found: warn

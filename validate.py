@@ -4,6 +4,7 @@ from io import BytesIO
 import json
 from pathlib import Path
 import re
+import stat
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, build_opener
 from zipfile import ZipFile
@@ -51,10 +52,15 @@ def package_bytes(root, entry):
         return response.read(LIMIT + 1)
 
 
-def check_capabilities(entry, api):
+def check_capabilities(entry, api, persona=False):
     """按目录校验 Api / Kind / HostAction（Api 3 还校验 Hooks 与 Permissions）。"""
     check(type(entry['Api']) is int and entry['Api'] == api, 'invalid Api for this catalog')
-    if api == 3:
+    if persona:
+        check(api == 1 and entry.get('Kind') == 'persona'
+              and entry.get('HostAction') is None
+              and not entry.get('Hooks') and not entry.get('Permissions'),
+              'persona packages cannot declare executable capabilities')
+    elif api == 3:
         check(entry.get('Kind') == 'message', 'invalid Kind for this catalog')
         check(entry.get('HostAction') is None, 'invalid HostAction for this catalog')
         hooks = entry.get('Hooks')
@@ -74,12 +80,12 @@ def check_capabilities(entry, api):
               'invalid Api, Kind or HostAction for this catalog')
 
 
-def check_entry(root, entry, api, seen):
+def check_entry(root, entry, api, seen, persona=False):
     plugin_id = entry['Id']
     check(re.fullmatch(r'[a-z][a-z0-9-]{0,47}', plugin_id)
           and not re.fullmatch(r'con|prn|aux|nul|com[1-9]|lpt[1-9]', plugin_id), 'invalid Id')
-    check_capabilities(entry, api)
-    for field in ('Name', 'Author', 'ResultLabel'):
+    check_capabilities(entry, api, persona)
+    for field in (('Name', 'Author') if persona else ('Name', 'Author', 'ResultLabel')):
         check(isinstance(entry.get(field), str) and 0 < len(entry[field].strip()) <= 80,
               f'invalid {field}')
     check(isinstance(entry.get('Description'), str) and len(entry['Description']) <= 600,
@@ -101,18 +107,31 @@ def check_entry(root, entry, api, seen):
     check(len(data) <= LIMIT, 'ZIP exceeds 1 MiB')
     check(hashlib.sha256(data).hexdigest() == entry['Sha256'].lower(), 'SHA-256 mismatch')
     with ZipFile(BytesIO(data)) as package:
-        check(sorted(package.namelist()) == ['plugin.json', 'plugin.wasm'], 'unexpected ZIP entries')
+        payload = 'persona.json' if persona else 'plugin.wasm'
+        check(sorted(package.namelist()) == sorted(['plugin.json', payload]), 'unexpected ZIP entries')
+        for item in package.infolist():
+            check(not item.flag_bits & 1 and not stat.S_ISLNK(item.external_attr >> 16),
+                  'encrypted files and symlinks are forbidden')
         check(package.getinfo('plugin.json').file_size <= 8192, 'manifest exceeds 8 KiB')
-        check(package.getinfo('plugin.wasm').file_size <= 512 * 1024, 'Wasm exceeds 512 KiB')
+        check(package.getinfo(payload).file_size <= (65536 if persona else 512 * 1024), 'payload exceeds size limit')
         manifest = json.loads(package.read('plugin.json'))
         check(manifest == {k: v for k, v in entry.items() if k not in CATALOG_ONLY},
               'package manifest differs from catalog')
-        check(package.read('plugin.wasm').startswith(b'\x00asm\x01\x00\x00\x00'), 'invalid Wasm header')
+        if persona:
+            preset = json.loads(package.read(payload))
+            check(isinstance(preset, dict) and set(preset) == {'customPrompt'}
+                  and isinstance(preset['customPrompt'], str)
+                  and 0 < len(preset['customPrompt'].strip()) <= 24000, 'invalid persona data')
+        else:
+            check(package.read(payload).startswith(b'\x00asm\x01\x00\x00\x00'), 'invalid Wasm header')
 
 
 def validate(root):
     seen = set()
-    for name, api in CATALOGS.items():
+    catalogs = {**CATALOGS}
+    if (root / 'index-personas.json').exists():
+        catalogs['index-personas.json'] = 1
+    for name, api in catalogs.items():
         data = (root / name).read_bytes()
         check(len(data) <= 256 * 1024, f'{name} exceeds launcher download limit')
         entries = json.loads(data)
@@ -123,7 +142,7 @@ def validate(root):
                 plugin_id = entry['Id']
                 check(plugin_id not in catalog_ids, 'duplicate Id in catalog')
                 catalog_ids.add(plugin_id)
-                check_entry(root, entry, api, seen)
+                check_entry(root, entry, api, seen, name == 'index-personas.json')
             except Exception as error:
                 raise ValueError(f'{name} entry {index}: {error}') from error
     return len(seen)
