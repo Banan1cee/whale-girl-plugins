@@ -101,17 +101,24 @@ function main(argv) {
 
   const zipName = `${manifest.Id}-${manifest.Version}.zip`;
   const target = path.join(ROOT, 'packages', zipName);
-  if (fs.existsSync(target)) {
-    console.error(`packages/${zipName} 已存在。已发布的版本不要覆盖，请先升 Version。`);
-    return 1;
-  }
-  fs.mkdirSync(path.dirname(target), { recursive: true });
   const bytes = zipStore([
     { name: 'plugin.json', data: fs.readFileSync(manifestFile) },
     { name: 'plugin.wasm', data: fs.readFileSync(wasmFile) },
   ]);
-  fs.writeFileSync(target, bytes);
   const sha = crypto.createHash('sha256').update(bytes).digest('hex');
+  if (fs.existsSync(target)) {
+    const existing = crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex');
+    if (existing !== sha) {
+      console.error(`packages/${zipName} 已存在且内容不同。已发布的版本不要覆盖，请先升 Version。`);
+      return 1;
+    }
+    // 内容一致就当作幂等：作者/agent 反复跑 submit 不应该报错。
+    console.log(`✓ packages/${zipName} 已存在且内容一致（${bytes.length} 字节），跳过写入`);
+    console.log('  SHA-256 ' + sha);
+    return 0;
+  }
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, bytes);
   console.log(`✓ packages/${zipName}（${bytes.length} 字节）`);
   console.log('  SHA-256 ' + sha);
   console.log('  下一步：node scripts/build-index.js --check 看目录，然后提交这两个路径');
