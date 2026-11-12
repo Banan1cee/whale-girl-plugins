@@ -19,7 +19,7 @@ concurrency:
 jobs:
   audit:
     name: 插件安全门禁
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

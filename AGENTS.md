@@ -5,7 +5,7 @@
 - 投稿前读 `security/README.md`。人设包进入 `index-personas.json`，只含清单与纯数据，不执行插件代码。不能通过自报类型绕过文件白名单。
 - Api 3 每版本必须有 `provenance/<id>-<version>.json`，绑定 GitHub 发布主体数字 ID、源仓库、完整 commit 和目录；包必须托管于本市场且旧包不可覆盖。代交账号与源码发布主体分别记录，不能把账号核验称为现实实名认证。
 - `security.yml` 是可信上架门禁，仅 checkout base 的检查器；候选源码和安装脚本禁止执行。Api 3 调用固定 commit/哈希的真实宿主运行时，纯数据包不做动态执行。任何超时、回退、权限或文件检查失败均不通过。
-- 新流程先通过 `security-selftest`；默认分支合并后才有可信投稿门禁与正式签署。最终启用 main 必需检查前先确认检查已上报。检测器或工作流变更须维护者审核。
+- 新流程先通过 `security-selftest`；默认分支合并后才有可信投稿门禁与正式签署。Wasm 检测使用 GitHub 托管 Ubuntu 完整 VM，Windows 启动器兼容性由主仓库 CI 验证。最终启用 main 必需检查前先确认检查已上报。检测器或工作流变更须维护者审核。
 
 ## 给 DSH 和其他编码代理
 

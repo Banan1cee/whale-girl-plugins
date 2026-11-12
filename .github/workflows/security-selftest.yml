@@ -8,7 +8,7 @@ permissions:
 jobs:
   tests:
     name: 安全检测器回归
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
