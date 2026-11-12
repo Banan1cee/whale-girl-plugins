@@ -30,9 +30,27 @@
 ## 上架步骤
 
 1. 按 [README 的打包规则](README.md#制作功能插件) 交付独立安装 ZIP。准备可审核的源码链接和构建步骤，列出插件 ID、版本、最低鲸鲸版本、所用 API 及权限。
-2. 用申报的最低兼容版本从本地安装 ZIP，验证启用、从卡片打开设置、运行、停用和卸载。需要授权时也测试拒绝。记录实测版本和结果。
-3. PR 只提交两处：`plugins/<id>/plugin.json`（源码可放同目录）和 `packages/<id>-<version>.zip`。目录条目、下载地址和 SHA-256 由 `scripts/build-index.js` 在合并后自动生成，**不要手改 `index*.json`**（多人同时投稿也不会冲突）。更新时提升版本号并保留已发布的旧包。提交前可本地自检：`node scripts/build-index.js --out <临时目录>`，再跑 `python validate.py`。
+2. 用申报的最低兼容版本从本地安装 ZIP，验证启用、从卡片打开设置、运行、停用和卸载。需要授权时也测试拒绝。记录实测版本和结果。**没有对应客户端时**（例如 4.1 尚未发布），改用 `node scripts/submit.js plugins/<id>` 的本地校验（打包 + 生成目录 + validate）代替，并在 PR 里注明「未 GUI 试装，已过本地校验」。
+3. PR 只提交两处：`plugins/<id>/plugin.json`（源码可放同目录）和 `packages/<id>-<version>.zip`。目录条目、下载地址和 SHA-256 由 `scripts/build-index.js` 在合并后自动生成，**不要手改 `index*.json`**（多人同时投稿也不会冲突）。更新时提升版本号并保留已发布的旧包。
 4. 只向 `Banan1cee/whale-girl-plugins:main` 提交上架 PR。PR 填写功能、源码、兼容版本、权限和试装结果。**上传通道现在就开放**：4.1 客户端尚未公开时也接收投稿，合并后条目立即进入目录，用户在装到支持该 Api 的客户端后就能看到并安装。因此 4.1 发布前允许先合并入库（先收录、后可用），但必须在 PR 里写明「所需客户端版本」；有正式客户端后补一条用同一份 ZIP 的试装记录即可。Api 3 仍须过 `security.yml` 检测。
+
+## 一句话上架（小白 + agent）
+
+用户说「做个 X 插件，上架」时，agent 按这四步做完，不要让用户自己敲命令：
+
+1. **写插件**：复制 `examples/api3-echo` 到 `plugins/<id>/`，改 `plugin.json` 的 Id、Name、Author、Version；业务逻辑改 `src/build.js` 的参数或 `src/wasm.js`。
+2. **本地自检**（不需要鲸鲸客户端）：
+
+   ```bash
+   node scripts/submit.js plugins/<id>                            # 打包 + 生成目录 + validate
+   node scripts/provenance.js plugins/<id> --login <GitHub 名>     # Api 3 必需；设 GITHUB_TOKEN 可自动取数字 ID
+   ```
+
+3. **提 PR**：fork → 推分支 → PR 到 `Banan1cee/whale-girl-plugins:main`。只提交 `plugins/<id>/`、`packages/<id>-<version>.zip`、`provenance/<id>-<version>.json`（Api 3）。
+   - 首次贡献者的 PR 需要维护者点一次「Approve and run workflows」，CI 才会跑，属正常，不是失败。
+4. **做不到的两件事要如实告诉用户**：合并必须由维护者点；4.1 正式客户端未发布时无法 GUI 试装，在 PR 里注明「未 GUI 试装，已过本地校验」即可先入库。
+
+不要手改 `index*.json`，不要给宿主仓库发 PR，不要签名（签名为可选项）。脚本都容忍 Windows 的 UTF-8 BOM；`package.js` 拒绝覆盖已发布的同版本包，升级请先改 Version。
 
 ## 可以直接复制给 DSH
 
@@ -44,6 +62,6 @@
 
 所有配置和操作仍放在插件卡片的「设置」。启用时确认持续参与消息处理，停用撤销授权，更新后重新启用。chat.history 和 model.prompt 分别声明，分别允许读取最近 12 条会话消息及读取、替换本轮系统提示词。
 
-先使用具备这些接口的本地开发版试装。同为 4.1.0 的旧客户端不一定支持 Api 3，需实际核对接口。公开上架仍需正式客户端发布；`index-v3.json` 由 `scripts/build-index.js` 从 `plugins/` 自动生成，对应 CI 已随 `index.yml` 一起上线。当前不能往 index.json 或 index-v2.json 混入 Api 3 条目。
+先使用具备这些接口的本地开发版试装。同为 4.1.0 的旧客户端不一定支持 Api 3，需实际核对接口。公开上架仍需正式客户端发布；`index-v3.json` 由 `scripts/build-index.js` 从 `plugins/` 自动生成，对应 CI 已随 `index.yml` 一起上线。当前不能往 `index.json` 或 `index-v2.json` 混入 Api 3 条目。
 
 定时任务、跨会话主动发送、自定义模型服务调用和语音控制尚未实现。chat.dispatched 表示网关提交结果，不能据此声称微信已经送达。完整输入输出协议见宿主仓库的 docs/插件消息流程Api3.md。
