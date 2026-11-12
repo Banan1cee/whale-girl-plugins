@@ -1,11 +1,13 @@
 # 插件分级检测与溯源
 
+> **上传通道已开放，先收录后可用。** 4.1 客户端还没公开发布，但投稿照收：合并后条目立即进目录，用户装到支持该 Api 的客户端即可安装。Api 3 每版本仍须过 `security.yml` 的虚拟机检测；它是否已成为 main 的必需检查，以仓库分支保护设置为准。
+
 ## 普通作者怎么投稿
 
 1. 人格预设 ZIP 只放 `plugin.json` 与 `persona.json`，`Api: 1`、`Kind: persona`，进入 `index-personas.json`。正文只允许 `customPrompt`。不需要运行测试、GitHub 实名认证或额外审核材料；也可直接本地分享 ZIP。
 2. Api 1/2 工具保留原目录，做格式、文件和哈希检查，不宣称经过 Api 3 动态检测。
 3. Api 3 消息插件进入 `index-v3.json`，每个版本增加 `provenance/<id>-<version>.json`。参考现有接话窗口文件填写发布者 GitHub login、数字 ID、源码仓库、完整 40 位 commit 和源码目录。作者名称可以署笔名，GitHub 账号验证不是现实实名验证。
-4. 安装包一律放在市场 `packages/<id>-<version>.zip`，目录填相应下载地址和 SHA-256。不要覆盖旧包；更新增加版本号。已有包禁止更改或删除，撤回只移除目录条目。
+4. 安装包一律放在市场 `packages/<id>-<version>.zip`。目录条目、下载地址和 SHA-256 由 `scripts/build-index.js` 生成，投稿人不用手填、也不要手改 `index*.json`。不要覆盖旧包；更新增加版本号。已有包禁止更改或删除，撤回只移除目录条目。
 5. 提 PR 后查看 Actions 的「插件安全门禁」和运行摘要，下载 `market-security-<run-id>` 报告。失败时按原因修改，再次提交会重新检测。无需在自己的电脑搭虚拟机。
 
 源码仓库的 owner ID 必须等于声明的发布者 ID。组织账号可以作为发布主体。代交者另记为报告中的 submitter，不冒充作者；当前不证明发布者的真实姓名或源码与安装包可重现构建一致。
