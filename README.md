@@ -42,6 +42,21 @@ plugins/<id>/plugin.json                 插件清单（源码可放在同一目
 packages/<id>-<version>.zip              固定版本的安装包
 ```
 
+### 一句话自检（小白和 agent 都用这个）
+
+```bash
+node scripts/submit.js plugins/<id>
+```
+
+它会打包 ZIP、在临时副本里生成目录、跑 `validate.py`，最后打印你要执行的 `git` / `gh` 命令。
+Api 3 再加一条：
+
+```bash
+node scripts/provenance.js plugins/<id> --login <你的 GitHub 名>
+```
+
+`scripts/package.js` 单独用也行（只打包并打印 SHA-256）；已发布的同版本包不允许覆盖，升级请先改 `Version`。
+
 合并到 main 后，`index` 工作流会运行 `node scripts/build-index.js`，按清单里的 `Api`/`Kind`
 把条目写进对应的 `index.json` / `index-v2.json` / `index-v3.json` / `index-personas.json`，
 并计算 SHA-256。作者不需要手写下载地址和哈希，也不会再因为同时改同一个 JSON 而冲突。
@@ -55,6 +70,8 @@ node scripts/build-index.js --check                     # 检查已提交目录�
 
 Api 3 消息插件仍需 `provenance/<id>-<version>.json`，并在 PR 里通过 `security` 工作流的虚拟机检测；
 人格预设只做静态格式检查。检测细节见 [安全检测指南](security/README.md)。
+
+> 没有鲸鲸客户端时也能投稿：本地校验（submit.js + validate）代替 GUI 试装，PR 里注明「未 GUI 试装，已过本地校验」即可先入库；等 4.1 发布后补试装记录。
 
 Api 1 工具只能读取用户在该工具页面输入的文字。Wasm 没有联网、读取微信或代发消息接口。Api 2 支持 UTF-8 文本输出，也可声明 `HostAction: chat.summary`，由兼容宿主在用户按次确认后提供汇总结果。兼容测试版可本地试装，公开上架前须按 [协作规则](AGENTS.md) 核对正式客户端和 CI。发现问题请提交 Issue，并注明插件 ID 和版本。
 

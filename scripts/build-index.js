@@ -21,12 +21,17 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
+
+/** Windows 编辑器常给 UTF-8 加 BOM；JSON.parse 不认，先剥掉。 */
+function stripBom(text) {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
 const PREFIX = 'https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/';
 const PERSONA = 'index-personas.json';
 const BY_API = { 1: 'index.json', 2: 'index-v2.json', 3: 'index-v3.json' };
 
 function readJson(file) {
-  return JSON.parse(fs.readFileSync(file, 'utf8'));
+  return JSON.parse(stripBom(fs.readFileSync(file, 'utf8')));
 }
 
 function sha256(file) {
