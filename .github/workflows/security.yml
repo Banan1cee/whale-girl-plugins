@@ -1,0 +1,79 @@
+name: market-security
+
+# 门禁使用默认分支的工作流和扫描器。投稿分支只提供 JSON 和 ZIP 数据。
+# 不 checkout 投稿分支，不运行投稿者的 JS、构建脚本、安装脚本或测试脚本。
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: market-security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: 插件安全门禁
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: 分级检测与发布溯源
+        shell: pwsh
+        env:
+          AUDIT_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          AUDIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          AUDIT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          SUBMITTER: ${{ github.event.pull_request.user.login || github.actor }}
+          SUBMITTER_ID: ${{ github.event.pull_request.user.id || github.actor_id }}
+          POLICY_COMMIT: ${{ github.event.pull_request.base.sha || github.sha }}
+          GH_READ_TOKEN: ${{ github.token }}
+          PYTHONUTF8: '1'
+        run: |
+          $argsList = @('security/audit.py', '--repo', $env:AUDIT_REPO, '--ref', $env:AUDIT_SHA,
+            '--submitter', $env:SUBMITTER, '--submitter-id', $env:SUBMITTER_ID,
+            '--output', "$env:RUNNER_TEMP/security-output")
+          if ($env:AUDIT_BASE) { $argsList += @('--base', $env:AUDIT_BASE) }
+          python @argsList
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 保存实际检测过的 ZIP 和报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-security-${{ github.run_id }}
+          path: ${{ runner.temp }}/security-output/
+          if-no-files-found: error
+          retention-days: 90
+
+  attest:
+    name: 签署已检测安装包
+    needs: audit
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      # 独立任务只签署前一任务的固定输出，不执行插件或下载的报告。
+      - uses: actions/download-artifact@v4
+        with:
+          name: market-security-${{ github.run_id }}
+          path: checked-packages
+      - uses: actions/attest@v4
+        with:
+          subject-path: 'checked-packages/*'
