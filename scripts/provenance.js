@@ -52,8 +52,8 @@ async function main() {
     return 1;
   }
   const manifest = JSON.parse(stripBom(fs.readFileSync(manifestFile, 'utf8')));
-  if (manifest.Api !== 3) {
-    console.error('provenance 只对 Api 3 消息插件需要；当前清单 Api=' + manifest.Api);
+  if (![3, 4].includes(manifest.Api)) {
+    console.error('provenance 对 Api 3/4 插件必需；当前清单 Api=' + manifest.Api);
     return 1;
   }
 

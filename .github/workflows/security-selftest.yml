@@ -25,6 +25,7 @@ jobs:
           PYTHONUTF8: '1'
         run: python -m unittest discover -s security -p 'test_*.py' -v
       - name: 新流程端到端试跑（开发验证，不签署）
+        if: success()
         shell: pwsh
         env:
           AUDIT_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
@@ -38,6 +39,8 @@ jobs:
           if ($env:AUDIT_BASE) { $argsList += @('--base', $env:AUDIT_BASE) }
           python @argsList
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: JavaScript 真实宿主隔离回归
+        run: python security/native_selftest.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

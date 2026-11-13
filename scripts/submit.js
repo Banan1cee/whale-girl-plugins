@@ -94,7 +94,7 @@ function main(argv) {
   }
 
   const zip = `packages/${manifest.Id}-${manifest.Version}.zip`;
-  const extra = manifest.Api === 3 ? ` provenance/${manifest.Id}-${manifest.Version}.json` : '';
+  const extra = [3, 4].includes(manifest.Api) ? ` provenance/${manifest.Id}-${manifest.Version}.json` : '';
   console.log(`
 本地自检通过。下一步（只提交这三类路径，别改 index*.json）：
 
