@@ -21,7 +21,7 @@ from validate import CATALOGS, PREFIX, check, check_entry  # noqa: E402
 
 CATALOG_NAMES = (*CATALOGS, 'index-personas.json')
 MAX_ENTRIES = 64
-MAX_SNAPSHOT = 16 * 1024 * 1024
+MAX_SNAPSHOT = 128 * 1024 * 1024
 REPOSITORY = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}/(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}', re.ASCII)
 COMMIT = re.compile(r'[a-f0-9]{40}', re.ASCII)
 
@@ -66,11 +66,12 @@ def snapshot(repo, commit, target):
     total = 0
     for item in tree['tree']:
         name = item['path']
-        if name not in CATALOG_NAMES and not name.startswith(('packages/', 'provenance/')):
+        manifest = re.fullmatch(r'plugins/[a-z][a-z0-9-]{0,47}/plugin\.json', name)
+        if name not in CATALOG_NAMES and not name.startswith(('packages/', 'provenance/')) and not manifest:
             continue
         safe_path(name)
         check(item['type'] == 'blob' and item['mode'] == '100644', 'market data must be ordinary files')
-        limit = 1024 * 1024 if name.startswith('packages/') else 256 * 1024
+        limit = 16 * 1024 * 1024 if name.startswith('packages/') else 8192 if manifest else 256 * 1024
         check(item.get('size', limit + 1) <= limit, 'candidate file too large')
         total += item['size']
         check(total <= MAX_SNAPSHOT, 'candidate snapshot exceeds limit')
@@ -81,11 +82,37 @@ def snapshot(repo, commit, target):
     return tree
 
 
+def generate_catalogs(root):
+    """Use trusted code and candidate JSON only; never run candidate build scripts."""
+    if not (root / 'plugins').is_dir():
+        return
+    catalogs = {name: [] for name in CATALOG_NAMES}
+    for file in sorted((root / 'plugins').glob('*/plugin.json')):
+        check(file.is_file() and not file.is_symlink() and file.stat().st_size <= 8192, 'invalid source manifest')
+        entry = json_data(file.read_bytes())
+        check(isinstance(entry, dict), 'invalid source manifest')
+        catalog = 'index-personas.json' if entry.get('Kind') == 'persona' else next(
+            (name for name, version in CATALOGS.items() if version == entry.get('Api')), None)
+        check(catalog is not None, 'unsupported source Api')
+        check(re.fullmatch(r'[a-z][a-z0-9-]{0,47}', entry.get('Id', ''))
+              and entry['Id'] == file.parent.name and re.fullmatch(r'\d+\.\d+\.\d+(\.\d+)?', entry.get('Version', '')),
+              'invalid source identity')
+        name = f"{entry['Id']}-{entry['Version']}.zip"
+        package = root / 'packages' / name
+        if not package.is_file():
+            continue  # An explicit source draft has no package to install.
+        check(not package.is_symlink(), 'invalid package file')
+        catalogs[catalog].append({**entry, 'Download': PREFIX + name,
+                                  'Sha256': hashlib.sha256(package.read_bytes()).hexdigest()})
+    for name, catalog in catalogs.items():
+        (root / name).write_text(json.dumps(catalog, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+
 def entries(root, legacy=False):
     found = []
     ids = set()
     for name in CATALOG_NAMES:
-        if legacy and name == 'index-personas.json' and not (root / name).exists():
+        if name == 'index-v4.json' and not (root / name).exists() or legacy and name == 'index-personas.json' and not (root / name).exists():
             continue
         check((root / name).is_file() and not (root / name).is_symlink(), f'missing catalog: {name}')
         raw = (root / name).read_bytes()
@@ -150,12 +177,12 @@ def ensure_immutable(root, base):
             if after == before:
                 check(item['Sha256'] == old['Sha256'], 'same version cannot replace a package')
             old_proof = base / 'provenance' / f"{old['Id']}-{old['Version']}.json"
-            if old_proof.exists() and item['Api'] == 3:
+            if old_proof.exists() and item['Api'] in (3, 4):
                 before_owner = json_data(old_proof.read_bytes())['publisher']['id']
                 check(provenance(root, item, False)['publisher']['id'] == before_owner, 'publisher transfer requires a separate policy review')
 
 
-def audit(root, output, runtime, *, online=False, base=None, node='node', context=None):
+def audit(root, output, runtime, *, online=False, base=None, node='node', context=None, native_runtime=None):
     output.mkdir(parents=True, exist_ok=True)
     report = {'schema': 1, 'status': 'failed', 'tested_at': datetime.now(timezone.utc).isoformat(),
               'context': context or {}, 'plugins': [],
@@ -174,10 +201,10 @@ def audit(root, output, runtime, *, online=False, base=None, node='node', contex
                 json_data(package.read('plugin.json'))
                 if is_persona:
                     json_data(package.read('persona.json'))
-                module = None if is_persona else package.read('plugin.wasm')
+                module = None if is_persona else package.read('plugin.js' if api_number == 4 else 'plugin.wasm')
             result = {'id': entry['Id'], 'version': entry['Version'], 'sha256': hashlib.sha256(data).hexdigest(),
                       'api': entry['Api'], 'kind': entry.get('Kind', 'tool'),
-                      'mode': 'api3-runtime' if api_number == 3 else 'static', 'status': 'passed',
+                      'mode': 'api4-container' if api_number == 4 else 'api3-runtime' if api_number == 3 else 'static', 'status': 'passed',
                       'permissions': entry.get('Permissions', []), 'hooks': entry.get('Hooks', [])}
             if api_number == 3:
                 result['provenance'] = provenance(root, entry, online)
@@ -194,6 +221,10 @@ def audit(root, output, runtime, *, online=False, base=None, node='node', contex
                 result['runtime'] = json_data(child.stdout)
                 check(result['runtime'].get('passed') is True, 'runtime did not pass')
                 result['host_runtime'] = runtime_pin
+            if api_number == 4:
+                from native import probe_native
+                result['provenance'] = provenance(root, entry, online)
+                result['runtime'] = probe_native(entry, module, native_runtime)
             report['plugins'].append(result)
             (output / file.name).write_bytes(data)
         report['status'] = 'passed'
@@ -220,11 +251,13 @@ def main():
         candidate = root / 'candidate'
         candidate.mkdir()
         snapshot(args.repo, args.ref, candidate)
+        generate_catalogs(candidate)
         base = None
         if args.base and args.base != '0' * 40:
             base = root / 'base'
             base.mkdir()
             snapshot(args.repo, args.base, base)
+            generate_catalogs(base)
         pin = json_data((TRUSTED / 'security/runtime.json').read_bytes())
         runtime = root / 'host-runtime.cjs'
         runtime.write_bytes(fetch(f"https://raw.githubusercontent.com/{pin['repository']}/{pin['commit']}/{pin['path']}", 100000))
@@ -233,7 +266,11 @@ def main():
                    'run_url': os.environ.get('GITHUB_SERVER_URL', 'https://github.com') + '/' + args.repo + '/actions/runs/' + os.environ.get('GITHUB_RUN_ID', 'local'),
                    'runner_os': os.environ.get('RUNNER_OS', sys.platform),
                    'policy_commit': os.environ.get('POLICY_COMMIT', '')}
-        report = audit(candidate, args.output, runtime, online=True, base=base, context=context)
+        native_runtime = None
+        if any(item['Api'] == 4 for _, item in entries(candidate)):
+            from native import prepare_runtime
+            native_runtime = prepare_runtime(root / 'native-runtime', fetch)
+        report = audit(candidate, args.output, runtime, online=True, base=base, context=context, native_runtime=native_runtime)
         lines = ['## 插件分级安全检测', '', f"检测版本：`{args.ref}`", '', '| 插件 | 类型 | 结果 | 包 SHA-256 |', '| --- | --- | --- | --- |']
         for item in report['plugins']:
             lines.append(f"| {item['id']} {item['version']} | {item['mode']} | {item['status']} | `{item['sha256']}` |")

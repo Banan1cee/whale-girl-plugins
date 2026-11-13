@@ -1,0 +1,10 @@
+{
+  "repository": "Banan1cee/whale_girl",
+  "commit": "4c579b02b69635ecb02c981ebe45dd219fd5941f",
+  "files": {
+    "javascriptPlugins.js": "55c0cac6a25ee129d5f2ba93e6645187375ded81d1ad0cbb538095f7e6d250b4",
+    "javascriptPluginWorker.js": "21db16c2e398d8a7b138d9de2fc324a259602c77936d30a5ab6b59076a933c6f",
+    "messagePlugins.js": "7b8a88329578896fe39787015bd237faceaa1d5d28c254abb43027267b2d27f1"
+  },
+  "image": "node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54"
+}

@@ -93,9 +93,10 @@ function main(argv) {
       return 1;
     }
   }
-  const wasmFile = path.join(dir, 'plugin.wasm');
+  const payload = manifest.Api === 4 ? 'plugin.js' : 'plugin.wasm';
+  const wasmFile = path.join(dir, payload);
   if (!fs.existsSync(wasmFile)) {
-    console.error('缺少 plugin.wasm：先跑 node src/build.js（见 examples/api3-echo）');
+    console.error('缺少 ' + payload + '：先完成插件构建');
     return 1;
   }
 
@@ -103,7 +104,7 @@ function main(argv) {
   const target = path.join(ROOT, 'packages', zipName);
   const bytes = zipStore([
     { name: 'plugin.json', data: fs.readFileSync(manifestFile) },
-    { name: 'plugin.wasm', data: fs.readFileSync(wasmFile) },
+    { name: payload, data: fs.readFileSync(wasmFile) },
   ]);
   const sha = crypto.createHash('sha256').update(bytes).digest('hex');
   if (fs.existsSync(target)) {

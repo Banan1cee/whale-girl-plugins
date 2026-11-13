@@ -1,0 +1,15 @@
+{
+  "Id": "api4-search-example",
+  "Name": "按需检索示例",
+  "Author": "Banan1cee",
+  "Version": "1.0.0",
+  "MinAppVersion": "4.1.2",
+  "Description": "JavaScript 完整权限开发示例：识别检索请求、保留资料来源与时间。",
+  "ResultLabel": "检索结果",
+  "Api": 4,
+  "Kind": "message",
+  "Hooks": ["chat.search", "tool.run"],
+  "Permissions": ["system.full"],
+  "ExecutionTimeoutMs": 15000,
+  "IntervalSeconds": 60
+}

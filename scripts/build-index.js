@@ -28,7 +28,7 @@ function stripBom(text) {
 }
 const PREFIX = 'https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/';
 const PERSONA = 'index-personas.json';
-const BY_API = { 1: 'index.json', 2: 'index-v2.json', 3: 'index-v3.json' };
+const BY_API = { 1: 'index.json', 2: 'index-v2.json', 3: 'index-v3.json', 4: 'index-v4.json' };
 
 function readJson(file) {
   return JSON.parse(stripBom(fs.readFileSync(file, 'utf8')));
@@ -45,7 +45,7 @@ function catalogFor(manifest) {
 
 /** 扫描 plugins/ + packages/，返回 { 目录文件名: [条目...] } */
 function collect(root = ROOT) {
-  const out = { [BY_API[1]]: [], [BY_API[2]]: [], [BY_API[3]]: [], [PERSONA]: [] };
+  const out = { [BY_API[1]]: [], [BY_API[2]]: [], [BY_API[3]]: [], [BY_API[4]]: [], [PERSONA]: [] };
   const pluginsDir = path.join(root, 'plugins');
   const packagesDir = path.join(root, 'packages');
   if (!fs.existsSync(pluginsDir)) return out;
