@@ -2,9 +2,9 @@
   "Id": "deepseek-whale-persona",
   "Name": "小鲸鱼（傲娇版）",
   "Author": "Xiaokun2233",
-  "Version": "1.1.2",
+  "Version": "1.1.5",
   "MinAppVersion": "4.1.0",
-  "Description": "DeepSeek 小鲸鱼（傲娇向）人格预设：嘴硬—行动—被戳破—炸毛的行为链，挂在尾巴、呆毛和逆鳞上。安装后在插件卡片「设置」启用，再在人格预设里预览并应用。",
+  "Description": "DeepSeek 小鲸鱼（傲娇向）人格预设：自称「本鱼」，嘴硬起手 + 真正有用的内容 + 一句嘴硬收尾，软只从尾巴和呆毛漏出来。按 4.1.0 的回答质量规则重写，不靠口癖撑人设。",
   "ResultLabel": "预设",
   "Api": 1,
   "Kind": "persona"
