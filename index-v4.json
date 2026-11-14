@@ -20,5 +20,26 @@
     "IntervalSeconds": 60,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/codebuddy-cli-model-1.2.0.zip",
     "Sha256": "fcaf89d30971dff462916aa9aba67972ba481e1e58dff2b9817e4d7a58603315"
+  },
+  {
+    "Id": "voice-tone",
+    "Name": "语音语气",
+    "Author": "Jy-Levent",
+    "Version": "1.0.0",
+    "MinAppVersion": "4.1.2",
+    "Description": "按 data/voice-presets.json 的当前预设给语音回复加 Breeze TTS 语气音效并同步语气指令；发语音而不重复发文字；预设文件缺失时自动生成内置默认（暴躁/呆萌）。仅适用于 Breeze TTS。",
+    "ResultLabel": "语音预设",
+    "Api": 4,
+    "Kind": "message",
+    "Hooks": [
+      "chat.before_send"
+    ],
+    "Permissions": [
+      "system.full"
+    ],
+    "ExecutionTimeoutMs": 20000,
+    "IntervalSeconds": 60,
+    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/voice-tone-1.0.0.zip",
+    "Sha256": "fbdd3479971e26b45abfa66b0eb147fec8a39e7b94eb9be8c63d486de76d3249"
   }
 ]
