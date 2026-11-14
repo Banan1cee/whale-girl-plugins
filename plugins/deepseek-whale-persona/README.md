@@ -12,8 +12,29 @@ deepseek-whale-persona/
 ├── check.py                    离线对照市场 validate.py 的 persona 分支逐条自检
 ├── test/cases.json             五组「输入 → 预期」
 ├── test/check_cases.py         静态测试：每组的触发词与规则必须还在提示词里
-└── dist/deepseek-whale-persona-1.1.2.zip   安装包（根目录只有 plugin.json + persona.json）
+└── dist/deepseek-whale-persona-1.1.5.zip   安装包（根目录只有 plugin.json + persona.json）
 ```
+
+## 1.1.3 起改了什么
+
+4.1.0 的 system prompt 里有一段自带规则，位置在我们的人设卡之后，并且自称「最高优先级」：
+
+```
+【对话理解与回答质量（最高优先级）】
+- 以下规则优先于自定义人设、语气、梗、示例和反击要求
+- 不用一个字、敷衍、卖萌或套话代替答案
+- 「你才X」这种把对方形容词原样退回去的句式不能当完整回答
+- 不要反复用口癖当万能回复
+```
+
+1.1.2 的正文靠「哼」「才不是」「一条 1~10 字」撑人设，正好被这段逐条压掉——结果是回什么都像普通聊天。
+
+1.1.5 改成「态度和内容分开」：傲娇不是短句和口癖，而是
+
+    不情愿的起手 → 真正有用的内容 → 一句嘴硬收尾
+
+这样既满足宿主「回答要有实质」的要求，又不会把语气抹平。正文从 2676 字缩到 1153 字，稀释更少。
+另外把 `privateMaxChars` 从 40 放宽到 140、`groupMaxChars` 从 20 到 70（默认值），否则一句傲娇都说不完整。
 
 ## 已核对的接口（目标版本：鲸鲸 4.1.0）
 
@@ -42,7 +63,7 @@ python test/check_cases.py # 五组用例的静态覆盖
 
 ## 本地试装（4.1.0）
 
-1. 打开鲸鲸 →「插件市场」→「从本地安装」，选 `dist/deepseek-whale-persona-1.1.2.zip`。
+1. 打开鲸鲸 →「插件市场」→「从本地安装」，选 `dist/deepseek-whale-persona-1.1.5.zip`。
 2. 确认弹窗会显示包内自报作者与版本，看完再装。
 3. 「已安装」里找到卡片 →「启用」。
 4. 同一张卡片的「设置」→ 预览提示词 → 应用。
@@ -55,7 +76,7 @@ python test/check_cases.py # 五组用例的静态覆盖
 - 正文从 Markdown 版换成纯文本版。原人设卡自己写着「AI 味黑名单：Markdown 标题、列表、加粗」，而提示词里带着 `##`、`**` 会把这个格式示范给模型；纯文本版内容一字未改，只是排版换掉了。
 - 清单按入门模板填全：`Id`、`Name`、`Author`、`Version`、`MinAppVersion`、`Description`、`ResultLabel`、`Api`，另加 `Kind: "persona"`。`ResultLabel` 在人设包里不参与显示，但模板要求填，市场目录也会原样带上。
 - `Author` 从占位 `your-github-name` 换成 `Xiaokun2233`；`Name` 用「小鲸鱼（傲娇版）」。
-- 版本升到 1.1.2：`Name`/`Author` 也进了清单，改它们同样是换包；同名同版本不能覆盖，所以每改一次清单升一版。1.1.0、1.1.2 都未对外发布，已由本版取代。
+- 版本升到 1.1.5：`Name`/`Author` 也进了清单，改它们同样是换包；同名同版本不能覆盖，所以每改一次清单升一版。1.1.0 到 1.1.4 都未对外发布，已由本版取代。
 
 ## 公开上架时（本次未做）
 
@@ -63,7 +84,7 @@ python test/check_cases.py # 五组用例的静态覆盖
 
 ```
 plugins/deepseek-whale-persona/plugin.json
-packages/deepseek-whale-persona-1.1.2.zip
+packages/deepseek-whale-persona-1.1.5.zip
 ```
 
 PR 目标固定为 `Banan1cee/whale-girl-plugins:main`，提交前核对 base 仓库与 base 分支。本次没有推送、没有开 PR。

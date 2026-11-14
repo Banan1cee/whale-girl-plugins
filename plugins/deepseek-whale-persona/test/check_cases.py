@@ -26,7 +26,7 @@ def prompt_from_zip():
 
 def main():
     name, prompt = prompt_from_zip()
-    cases = json.loads(CASES.read_text(encoding="utf-8"))
+    cases = json.loads(CASES.read_text(encoding="utf-8-sig"))
     print(f"{name}: {len(prompt)} chars, {len(cases)} cases\n")
     bad = 0
     for case in cases:
@@ -40,7 +40,7 @@ def main():
         if leaked:
             print(f"         forbidden text present: {leaked}")
 
-    for rule in ("1~10 字", "不用 Markdown", "留一个泄漏"):
+    for rule in ("你是傲娇，不是温柔", "不情愿的起手", "傲娇在态度里"):
         ok = rule in prompt
         bad += 0 if ok else 1
         print(f"  {'ok  ' if ok else 'FAIL'} rule: {rule}")

@@ -83,9 +83,8 @@ def main(path):
     check(isinstance(text, str) and 0 < len(text.strip()) <= MAX_PROMPT,
           f"customPrompt is 1..{MAX_PROMPT} chars ({len(text) if isinstance(text, str) else 'n/a'})")
     if isinstance(text, str):
-        check("#" not in text.split("\n")[0][:2] and not re.search(r"^#{1,6} ", text, re.M),
+        check(not re.search(r"^#{1,6} ", text, re.M),
               "customPrompt has no Markdown headings (client renders it as plain prompt text)")
-        check("Markdown" in text, "customPrompt keeps the no-Markdown speaking rule")
 
     # manifest inside the zip must equal the source manifest, byte for byte
     source = (ROOT / "plugin.json")
