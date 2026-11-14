@@ -1,0 +1,19 @@
+{
+  "Id": "voice-tone",
+  "Name": "语音语气",
+  "Author": "Jy-Levent",
+  "Version": "1.0.0",
+  "MinAppVersion": "4.1.2",
+  "Description": "按 data/voice-presets.json 的当前预设给语音回复加 Breeze TTS 语气音效并同步语气指令；发语音而不重复发文字；预设文件缺失时自动生成内置默认（暴躁/呆萌）。仅适用于 Breeze TTS。",
+  "ResultLabel": "语音预设",
+  "Api": 4,
+  "Kind": "message",
+  "Hooks": [
+    "chat.before_send"
+  ],
+  "Permissions": [
+    "system.full"
+  ],
+  "ExecutionTimeoutMs": 20000,
+  "IntervalSeconds": 60
+}
