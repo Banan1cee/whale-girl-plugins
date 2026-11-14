@@ -1,0 +1,19 @@
+{
+  "Id": "voice-tone",
+  "Name": "语音语气",
+  "Author": "Jy-Levent",
+  "Version": "1.0.1",
+  "MinAppVersion": "4.1.2",
+  "Description": "给语音回复加 Breeze TTS 语气音效（按 data/voice-presets.json 的当前预设），并同步语气指令；发语音时不重复发文字；预设文件缺失会自动生成内置默认（暴躁/呆萌/普通/温柔/冷酷 五套），已有文件绝不覆盖。仅适用于 Breeze TTS。想可视化地调语气？配套编辑器在作者仓库 Jy-Levent/whale-voice-tone-tools，另外下载就好。",
+  "ResultLabel": "语音预设",
+  "Api": 4,
+  "Kind": "message",
+  "Hooks": [
+    "chat.before_send"
+  ],
+  "Permissions": [
+    "system.full"
+  ],
+  "ExecutionTimeoutMs": 20000,
+  "IntervalSeconds": 60
+}
