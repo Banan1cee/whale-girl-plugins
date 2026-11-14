@@ -1,0 +1,13 @@
+{
+  "Id": "context-notes",
+  "Name": "上下文读取",
+  "Author": "Xiaokun2233",
+  "Version": "1.2.1",
+  "MinAppVersion": "4.1.0",
+  "Description": "两个环节：回复前读最近 12 条并用独立 state 累计跨轮上下文，补一张便签（谁在连发、有没有问题没答、第几次找你）；发送前清掉 Markdown、压缩空白、拦住跑飞的长回复。",
+  "ResultLabel": "上下文",
+  "Api": 3,
+  "Kind": "message",
+  "Hooks": ["chat.prompt", "chat.before_send"],
+  "Permissions": ["chat.history", "model.prompt"]
+}
