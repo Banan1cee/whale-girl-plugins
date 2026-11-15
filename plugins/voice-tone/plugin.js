@@ -1,17 +1,16 @@
-'use strict';
-
 /**
  * 鲸鲸语音语气插件（Api 4）。
  *
- * 职责：在回复最终发送前，按 data/voice-presets.json 的当前预设
- *   1) 给语音文本加 breeze 音频标签；
- *   2) 把该预设的 instructions 同步进 data/voice-send.json；
- *   3) 用 whale.sendVoice() 自己把语音投递出去；
- *   4) 返回空 text，阻止宿主再把同一句当文字发一遍。
- *   5) 预设文件不存在时，自动生成内置默认预设（暴躁 / 呆萌）。
+ * 只做「文本加工」，不抢发送权（1.0.2 起）：
+ *   1) 按 data/voice-presets.json 的当前预设，把该预设的 instructions 同步进
+ *      data/voice-send.json（语气指令，启动器/桥接读取）；
+ *   2) 全语音模式（语音概率 100%）下，把 Breeze 音频标签插进回复文本；
+ *   3) 返回加工后的 text，由宿主原生流程决定发文字还是发语音。
  *
- * 只在「决定要发语音」时才这么干，其它情况一律返回 undefined，
- * 让宿主按原流程发文字，行为与原生一致。
+ * 为什么不再自己调 whale.sendVoice：宿主 send() 会把插件传入的第一个参数当 wxid
+ * 塞进提醒队列，而插件能拿到的只有内部会话 id（不是 wxid/昵称），异步发送时
+ * 桥接在微信里搜不到会话 → 语音发不出去、文字又被吞 → 消息彻底丢失。
+ * 原生发送通道是可靠的，所以把发送交还宿主。
  */
 
 const fs = require('node:fs');
@@ -22,22 +21,34 @@ const ROOT = whale.paths.appRoot;
 const PRESET_FILE = path.join(ROOT, 'data', 'voice-presets.json');
 const SEND_FILE = path.join(ROOT, 'data', 'voice-send.json');
 const BREAKS = '，,。！!？?；;…';
+// 表演型标签：作用于整句念法，放句首；其余一律按反应型处理（放触发词前）
+const LEAD_TAGS = ['[喊叫]', '[耳语]'];
+/** 注入给 LLM 的语音标签规范（放在 system prompt 末尾，不改人设文件）。 */
+const TAG_RULES_PROMPT = [
+  '【语音音效标签（只在发语音时用）】',
+  '可用标签仅限这些：[笑][轻笑][咯咯笑][哭声][抽泣][呜咽][叹气][惊呼][吸气][耳语][喊叫][停顿][清嗓][啧嘴][打哈欠][闷哼][冷笑][哼鼻子]。',
+  '规则：一句最多用一个；表演型（[喊叫][耳语][冷笑]）放在整句最前面；反应型（[叹气][啧嘴][哼鼻子][轻笑][吸气]）紧贴触发词前面；不要自造其它标签（例如 [撒娇][笑眯眯][开心] 都不行）；发纯文字时完全不要带标签。',
+].join('\n');
+
+
 const LEAD_WORDS = ['唉', '哎', '啧', '哼', '算了', '无所谓'];
-const VOICE_REQUEST = /(?:发|来|说|讲|回复)(?:给我|个|一条|一句|句|段|一段|条|一下|点|一段话|个回复|次|一)?\s*语音|用语音(?:回|说|讲)|语音(?:回我|回复|说一句)/;
-const NO_VOICE = /不要|别(?:再)?|不想|不用|不能|怎么|如何|关闭|取消/;
+// 与 bridge/voice_reply.py 的 REQUEST / NEGATIVE / choose() 保持完全一致，
+// 这样插件能算准「这条回复一定会被发成语音」，避免给文字回复加上音效标签。
+const REQUEST = /(?:发|来|说|讲|回复)(?:给我|个|一条|一句|句|段|一段|条|一下|点|一段话|个回复|次|一)?\s*语音|用语音(?:回|说|讲)|语音(?:回我|回复|说一句)/;
+const NEGATIVE = /不要|别(?:再)?|不想|不用|不能|怎么|如何|他说|她说|有人说|关闭|取消|["“”‘’]/;
 const TEXT_ONLY = /(?:不要|别|不用|不想|取消|关闭).{0,12}语音|语音.{0,8}(?:不要|取消|关闭)|(?:用|只要|只用).{0,3}(?:文字|文本)|(?:文字|文本)回复/;
 
 /** 内置默认预设：与分享包 voice-presets.json 完全一致，预设文件不存在时自动生成；已存在（哪怕损坏）绝不覆盖。 */
 const DEFAULT_PRESETS = {
-  "_说明": "鲸鲸语音预设。改这里不用改代码，重启 WhaleGirl 生效。active 指向当前用哪套；tags 按顺序匹配，命中第一个就停（整段只插一个）。每条可以用 words（关键词数组，自动转义）或 pattern（正则，进阶）。tag 必须是 breeze 官方中文标签原词。",
+  "_说明": "鲸鲸语音预设。改这里不用改代码，重启 WhaleGirl 生效。active 指向当前用哪套；tags 按顺序匹配，命中第一个就停（整段只插一个）。每条可以用 words（关键词数组，自动转义）或 pattern（正则，进阶）。tag 必须是 breeze 官方中文标签原词。 voiceChance = 这套预设的语音概率（0-100，插件按它掷骰子决定这条回语音还是文字；总概率设为 0 时插件不干预，只在你明确要语音时才发）。",
   "_标签参考": "笑[笑][轻笑][咯咯笑]｜哭[哭声][抽泣][呜咽][呻吟][哀号]｜呼吸[叹气][惊呼][吸气][呼气][喘息]｜发声[耳语][喊叫][惨叫][唱歌][哼歌][结巴][停顿]｜喉鼻[清嗓][咳嗽][吸鼻子]｜口腔[咂嘴][啧嘴]｜反射[打哈欠][打喷嚏][打嗝][打饱嗝][吞咽][干呕]｜反应[闷哼][冷笑][哼鼻子]",
   "_不可用的": "官方没有「开心/生气/惊讶/伤心」这类情绪标签，只能映射到最接近的发声事件。自造的词不会被识别，还会被念出来。",
   "active": "irritable",
   "presets": {
     "irritable": {
       "name": "暴躁",
-      "desc": "一点就炸、没耐心、说话冲：多用哼鼻子/冷笑/啧嘴/喊叫，几乎不用温柔音",
-      "instructions": "她脾气不好，说话冲、没耐心，句子短、收得快。语速偏快，重音落在句尾，不带笑意。不用播音腔、不撒娇、不哄人。 爆粗口、骂人的时候要真的凶：明显抬高音量，咬牙切齿地喊出来，别轻轻带过。",
+      "desc": "脾气暴、一点就着、说话冲带脏字：吼人、骂人、嫌弃都不留情面",
+      "instructions": "她脾气暴躁，一点就着，说话冲、带脏字，句子短促，语速快，重音砸在句尾。被惹毛时直接爆粗，咬牙切齿地吼出来，音量明显抬高，凶得不留情面，不哄人、不道歉。不用播音腔、不撒娇。",
       "tags": [
         {
           "tag": "[喊叫]",
@@ -48,29 +59,36 @@ const DEFAULT_PRESETS = {
             "别逼我",
             "你再说一遍",
             "受够了",
-            "忍不了"
+            "忍不了",
+            "滚蛋",
+            "烦不烦",
+            "闭嘴吧"
           ],
-          "when": "炸毛 / 被惹火（唯一会明显变响的）"
+          "when": "暴躁吼人"
         },
         {
           "tag": "[喊叫]",
-          "pattern": "我[草操]|卧[槽草]|他妈的|你妈的|草泥马|nmsl|tmd|TMD|妈的[！!？?]",
-          "when": "爆粗口（我草 / tmd 这类）"
+          "pattern": "我[草操]|卧[槽草]|他妈的|你妈的|草泥马|nmsl|nm[lL]|tmd|TMD|妈的[！!？?]|傻[逼比]|去死",
+          "when": "爆粗口 / 骂人"
         },
         {
           "tag": "[哼鼻子]",
           "words": [
             "气死",
             "烦死",
+            "烦人",
             "过分",
             "凭什么",
             "少来",
             "别烦",
             "够了",
             "神经病",
-            "有病"
+            "有病",
+            "讨厌",
+            "离谱",
+            "气人"
           ],
-          "when": "生气 / 不耐烦"
+          "when": "不耐烦"
         },
         {
           "tag": "[冷笑]",
@@ -82,9 +100,11 @@ const DEFAULT_PRESETS = {
             "典",
             "急了",
             "可笑",
-            "呵呵"
+            "呵呵",
+            "就你",
+            "谁信啊"
           ],
-          "when": "嘲讽 / 看不起"
+          "when": "冷嘲"
         },
         {
           "tag": "[啧嘴]",
@@ -93,9 +113,10 @@ const DEFAULT_PRESETS = {
             "切",
             "得了吧",
             "省省",
-            "别演了"
+            "别演了",
+            "烦"
           ],
-          "when": "嫌弃 / 打断"
+          "when": "嫌弃"
         },
         {
           "tag": "[叹气]",
@@ -107,7 +128,7 @@ const DEFAULT_PRESETS = {
             "算了",
             "爱咋咋"
           ],
-          "when": "无语 / 懒得理"
+          "when": "无语"
         },
         {
           "tag": "[吸气]",
@@ -116,14 +137,15 @@ const DEFAULT_PRESETS = {
             "不是吧",
             "睁眼说瞎话"
           ],
-          "when": "纯惊讶（不带脏话）"
+          "when": "惊讶"
         },
         {
           "tag": "[闷哼]",
           "pattern": "啊[？?]|哈[？?]|你说什么",
-          "when": "反问 / 不服"
+          "when": "反问"
         }
-      ]
+      ],
+      "voiceChance": 25
     },
     "adorkable": {
       "name": "呆萌",
@@ -184,7 +206,8 @@ const DEFAULT_PRESETS = {
           ],
           "when": "开心地应答"
         }
-      ]
+      ],
+      "voiceChance": 25
     },
     "normal": {
       "name": "普通",
@@ -216,7 +239,8 @@ const DEFAULT_PRESETS = {
           "pattern": "哇[！!]|天哪|真的假的|不是吧",
           "when": "轻度惊讶"
         }
-      ]
+      ],
+      "voiceChance": 10
     },
     "gentle": {
       "name": "温柔",
@@ -264,7 +288,8 @@ const DEFAULT_PRESETS = {
           ],
           "when": "凑近说小话"
         }
-      ]
+      ],
+      "voiceChance": 20
     },
     "cold": {
       "name": "冷酷",
@@ -322,7 +347,8 @@ const DEFAULT_PRESETS = {
           "pattern": "嗯[？?]|啊[？?]|什么[？?]",
           "when": "冷淡反问"
         }
-      ]
+      ],
+      "voiceChance": 15
     }
   }
 };
@@ -349,6 +375,89 @@ function ensurePresetFile() {
 }
 
 /** 把预设里的 words / pattern 编译成正则，单条写错不影响其它条。 */
+/** 概率覆盖的状态文件（放在插件数据目录，随插件走）。 */
+const STATE_FILE = path.join(whale.paths.pluginData, 'prob-state.json');
+
+function readState() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    return raw && typeof raw === 'object' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeState(obj) {
+  try {
+    fs.writeFileSync(STATE_FILE, JSON.stringify(obj), 'utf8');
+  } catch {
+    /* 写不进状态文件时宁可不覆盖，避免概率卡死 */
+  }
+}
+
+function clearState() {
+  try {
+    fs.unlinkSync(STATE_FILE);
+  } catch {
+    /* 没有就算了 */
+  }
+}
+
+/** 按启动器习惯写回 voice-send.json（纯 ASCII 转义）。 */
+function writeSend(send) {
+  const escaped = JSON.stringify(send).replace(/[\u0080-\uFFFF]/g, (ch) =>
+    '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0'));
+  fs.writeFileSync(SEND_FILE, escaped, 'ascii');
+}
+
+/**
+ * 还原上次临时覆盖的 Probability。
+ *
+ * 关键校验：只有「当前值仍是我们写的临时值」时才还原 —— 如果中间被用户手动改过
+ * （启动器设置页写入了新概率），说明用户意图已变，直接放弃还原、清掉状态即可。
+ */
+function restoreProbability() {
+  const st = readState();
+  if (!st || st.pending !== true || !Number.isFinite(Number(st.original))) {
+    clearState();
+    return;
+  }
+  try {
+    const send = readJson(SEND_FILE);
+    if (!send) return;
+    const current = Number(send.Probability);
+    if (Number.isFinite(Number(st.temp)) && current !== Number(st.temp)) {
+      // 用户中途改过概率：以用户为准，放弃还原
+      clearState();
+      return;
+    }
+    send.Probability = Math.max(0, Math.min(100, Number(st.original)));
+    writeSend(send);
+  } catch {
+    /* 还原失败就留状态，下次再试 */
+    return;
+  }
+  clearState();
+}
+
+/** 临时把 Probability 改成 100/0，让 bridge 严格跟随插件这次的决定。 */
+function overrideProbability(value, current) {
+  const target = Number(value) >= 100 ? 100 : 0;
+  if (Number(current) === target) return true;
+  if (!Number.isFinite(Number(current))) return false;
+  writeState({ pending: true, original: Number(current), temp: target, at: Date.now() });
+  try {
+    const send = readJson(SEND_FILE);
+    if (!send) return false;
+    send.Probability = target;
+    writeSend(send);
+    return true;
+  } catch {
+    clearState();
+    return false;
+  }
+}
+
 function compileRules(tags) {
   const out = [];
   for (const item of tags || []) {
@@ -375,29 +484,32 @@ function compileRules(tags) {
   return out;
 }
 
-/** 与 Python 侧 add_audio_tags 保持一致：整段最多一个，句首语气词改放句末。 */
+/**
+ * 插音频标签。分两类（实测 + 与 Breeze/ElevenLabs 实践一致）：
+ *
+ *   - 表演型（[喊叫] [耳语]）：放在整句最前面，让整句都用这个"念法"说。
+ *   - 反应型（[冷笑] [哼鼻子] [叹气] [啧嘴] [吸气] …）：放在**触发词前面**，
+ *     音效紧贴那句话说，不抢整句的语气。
+ *
+ * 触发词本来就在句首时，反应型标签自然落到句首（比如"烦死了，…"→"[哼鼻子] 烦死了，…"）。
+ * 已含标签、文本过短、或没命中规则时原样返回。
+ */
 function addTags(text, rules) {
   const s = String(text == null ? '' : text);
-  if (s.length < 4 || s.indexOf('[') >= 0 || s.indexOf(']') >= 0) return s;
+  if (s.length < 2 || s.indexOf('[') >= 0 || s.indexOf(']') >= 0) return s;
   for (const rule of rules) {
     const match = rule.re.exec(s);
     if (!match) continue;
-    const head = s.slice(0, match.index + match[0].length).trim();
-    if (match.index <= 1 && LEAD_WORDS.indexOf(head) >= 0) {
-      return (s.replace(/\s+$/, '') + ' ' + rule.tag).replace(/\s+$/, '');
+    if (LEAD_TAGS.indexOf(rule.tag) >= 0) {
+      return (rule.tag + ' ' + s).replace(/\s+$/, '');
     }
-    const rest = s.slice(match.index + match[0].length);
-    let cut = -1;
-    for (let i = 0; i < rest.length; i += 1) {
-      if (BREAKS.indexOf(rest[i]) >= 0) {
-        cut = match.index + match[0].length + i + 1;
-        break;
-      }
+    const before = s.slice(0, match.index).replace(/\s+$/, '');
+    const after = s.slice(match.index);
+    if (!before) {
+      return (rule.tag + ' ' + after).replace(/\s+$/, '');
     }
-    if (cut < 0) return (s.replace(/\s+$/, '') + ' ' + rule.tag).replace(/\s+$/, '');
-    const before = s.slice(0, cut).replace(/\s+$/, '');
-    const after = s.slice(cut).replace(/^\s+/, '');
-    return (before + rule.tag + ' ' + after).replace(/\s+$/, '');
+    const sep = /[，,。！!？?；;…]$/.test(before) ? '' : ' ';
+    return (before + sep + rule.tag + ' ' + after).replace(/\s+$/, '');
   }
   return s;
 }
@@ -419,55 +531,127 @@ function syncInstructions(preset) {
   return true;
 }
 
-/** 是否发语音：明确要求优先，否则按概率。规则与原 Python 侧保持一致。 */
-function shouldVoice(incoming, cfg, isGroup) {
+/**
+ * 用户这句话是不是「明确在要语音」。
+ *
+ * 比 bridge 的 requested() 更懂说话方式：先把引号里的台词剥掉，只看指令部分。
+ * 否则「你发语音说："你烦死人了，别来烦我了"」会因为台词里的引号/「别」被
+ * bridge 的 NEGATIVE 判成「不是明确要求」，只能掉进概率骰子。
+ */
+function wantsVoiceExplicit(incoming) {
+  const raw = String(incoming == null ? '' : incoming);
+  if (!raw || raw.length > 500) return false;
+  // 剥掉成对引号/书名号里的台词（"…" “…” ‘…’ 《…》）
+  const core = raw
+    .replace(/["“][^"“”]*["”]/g, ' ')
+    .replace(/[‘][^‘’]*[’]/g, ' ')
+    .replace(/《[^》]*》/g, ' ');
+  if (TEXT_ONLY.test(core)) return false;
+  // 只排除真正的转述，不再因为引号或「别」而否决
+  if (/他说|她说|有人说|听说|别人说/.test(core)) return false;
+  return REQUEST.test(core);
+}
+
+/**
+ * 这条回复会不会「确定」被发成语音（与 bridge choose() 同规则）。
+ *
+ * 只有两种情况确定：用户明确要求语音（REQUEST 命中且没被 NEGATIVE/TEXT_ONLY 否决），
+ * 或 Probability >= 100。概率落在中间的属于随机场景，这里返回 false ——
+ * 宁可这条随机语音没有音效，也绝不给文字回复塞标签。
+ */
+function certainVoice(incoming, cfg, isGroup) {
   const text = String(incoming == null ? '' : incoming);
   if (!cfg || cfg.Enabled !== true) return false;
   const scope = isGroup ? cfg.Groups : cfg.Private;
   if (scope === false) return false;
   if (TEXT_ONLY.test(text)) return false;
-  if (text.length <= 500 && !NO_VOICE.test(text) && VOICE_REQUEST.test(text)) return true;
+  if (text.length <= 500 && !NEGATIVE.test(text) && REQUEST.test(text)) return true;
   const chance = Number(cfg.Probability);
-  if (!Number.isFinite(chance) || chance <= 0 || chance > 100) return false;
-  return Math.random() < chance / 100;
+  return Number.isFinite(chance) && chance >= 100;
 }
 
 exports.hooks = {
+  // 每次生成前把标签规范追加进 system prompt：让模型主动只用官方标签，
+  // 而不是等回复生成后再靠清洗补救（不修改人设文件，仅本次请求生效）。
+  'chat.prompt': function (ctx) {
+    try {
+      const system = String((ctx && ctx.system) || '');
+      if (!system || system.indexOf('【语音音效标签') >= 0) return undefined;
+      return { system: system + '\n\n' + TAG_RULES_PROMPT };
+    } catch {
+      return undefined;
+    }
+  },
+
   'chat.before_send': async function (ctx) {
     try {
-      const msg = (ctx && ctx.message) || {};
-      const chatId = String(msg.chatId || '').trim();
-      if (!chatId) return;
+      // 每条消息开头先把上一条临时覆盖的 Probability 还原，否则 100 会被误当成用户设置
+      restoreProbability();
+      const raw = String(ctx && ctx.text == null ? '' : ctx.text).trim();
+      if (!raw) return undefined;
+      const text = raw;
+
       let data = readJson(PRESET_FILE);
       if (!data) {
         // 预设文件不存在：自动生成内置默认；已存在（哪怕损坏）不覆盖
         ensurePresetFile();
         data = readJson(PRESET_FILE);
       }
-      if (!data || !data.presets) return;
+      if (!data || !data.presets) return undefined;
       const preset = data.presets[String(data.active || '')];
-      if (!preset) return;
-      const cfg = readJson(SEND_FILE);
-      const isGroup = msg.chatType === 'group';
-      if (!shouldVoice(msg.text, cfg, isGroup)) return;
-      const text = String(ctx.text == null ? '' : ctx.text).trim();
-      if (!text) return;
-      const tagged = addTags(text, compileRules(preset.tags));
+      if (!preset) return undefined;
+
+      // 1) 语气指令：每次回复都同步，文字与语音都吃这个设置
       try {
         syncInstructions(preset);
       } catch {
-        /* 写不进就沿用旧语气，不影响发语音 */
+        /* 写不进就沿用旧语气 */
       }
-      const sent = await whale.sendVoice(chatId, tagged, {
-        name: String(msg.chatTitle || msg.senderName || chatId),
-        chatType: isGroup ? 'group' : 'private',
-      });
-      if (!sent || !sent.id) return;
-      // 已入队：返回空文本，阻止宿主把同一句再当文字发一遍
-      return { text: '' };
+
+      // 2) 决定这条要不要语音：明确要求语音 → 必语音；否则按预设 voiceChance 掷骰子。
+      //    然后把 Probability 临时覆盖成 100/0，让 bridge 严格跟随（标签与发送永远一致）。
+      const cfg = readJson(SEND_FILE) || {};
+      const msg = (ctx && ctx.message) || {};
+      const isGroup = msg.chatType === 'group';
+
+      // 明确要求语音（或用户已设 100%）→ 必语音，不掷骰子
+      const certain = wantsVoiceExplicit(msg.text)
+        || (Number.isFinite(Number(cfg.Probability)) && Number(cfg.Probability) >= 100);
+      const userChance = Number(cfg.Probability);
+
+      // 用户把概率设成 0（明确不要自动语音）时插件完全不干预
+      if (!certain && (!Number.isFinite(userChance) || userChance <= 0)) return undefined;
+
+      let wantVoice;
+      if (certain) {
+        wantVoice = true;
+      } else {
+        // 中间概率：插件接管，按预设 voiceChance 掷骰子，再强制 bridge 跟随
+        const presetChance = Number(preset.voiceChance);
+        const target = Number.isFinite(presetChance) ? presetChance : userChance;
+        wantVoice = Number.isFinite(target) && target > 0 && Math.random() * 100 < target;
+      }
+
+      if (cfg.Enabled === true && Number.isFinite(userChance)) {
+        overrideProbability(wantVoice ? 100 : 0, userChance);
+      }
+      if (!wantVoice) return undefined;
+
+      const tagged = addTags(text, compileRules(preset.tags));
+      // 与「原始文本」比较：清洗或加标签只要改变了内容就回传，否则不动
+      if (tagged === raw) return undefined;
+      // 返回加工后的文本：语音由宿主原生流程合成（标签被 Breeze 识别）
+      return { text: tagged };
     } catch {
-      // 任何异常都退回宿主默认行为（正常发文字），不让消息丢失
-      return;
+      // 任何异常都退回宿主默认行为，绝不吞消息
+      return undefined;
     }
   },
 };
+
+// 插件加载即还原上次的临时覆盖（异常退出的兜底）
+try {
+  restoreProbability();
+} catch {
+  /* 加载期出错不影响宿主 */
+}
