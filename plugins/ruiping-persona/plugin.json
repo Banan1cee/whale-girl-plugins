@@ -1,0 +1,11 @@
+{
+  "Id": "ruiping-persona",
+  "Name": "锐评人格（事实先行版）",
+  "Author": "Peelorange233",
+  "Version": "1.1.0",
+  "MinAppVersion": "4.1.0",
+  "Description": "锐评人格预设：先确认事实再下判断，一句话金句或暴论，只打事件不打人；数字没出处就不写，证据不足直接说「没查到」。适合配合「锐评」插件使用，也可以单独安装：装完在「人格」里选中即可。不包含任何插件代码，不改宿主设置。",
+  "ResultLabel": "预设",
+  "Api": 1,
+  "Kind": "persona"
+}
