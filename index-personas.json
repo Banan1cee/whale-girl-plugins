@@ -3,13 +3,26 @@
     "Id": "deepseek-whale-persona",
     "Name": "小鲸鱼（傲娇版）",
     "Author": "Xiaokun2233",
-    "Version": "1.1.5",
+    "Version": "1.1.6",
     "MinAppVersion": "4.1.0",
-    "Description": "DeepSeek 小鲸鱼（傲娇向）人格预设：自称「本鱼」，嘴硬起手 + 真正有用的内容 + 一句嘴硬收尾，软只从尾巴和呆毛漏出来。按 4.1.0 的回答质量规则重写，不靠口癖撑人设。",
+    "Description": "DeepSeek 小鲸鱼（傲娇向）人格预设：自称「本鱼」，嘴硬起手 + 真正有用的内容 + 一句嘴硬收尾，软只从尾巴和呆毛漏出来。1.1.6 加入记忆隔离，切换人设后不沿用旧口癖。",
     "ResultLabel": "预设",
     "Api": 1,
     "Kind": "persona",
-    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/deepseek-whale-persona-1.1.5.zip",
-    "Sha256": "7bdb6a80c2e8c26f12fe722be7eba775c940276ceceb4f8965d1ce7e38775df1"
+    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/deepseek-whale-persona-1.1.6.zip",
+    "Sha256": "903b37e51f4fe2f1c0df595ad8f300bb683d0aca43fe57c236fd1b5f3efbec50"
+  },
+  {
+    "Id": "deepseek-whale-sister",
+    "Name": "小鲸鱼（邻家大姐姐版）",
+    "Author": "Xiaokun2233",
+    "Version": "1.3.1",
+    "MinAppVersion": "4.1.0",
+    "Description": "DeepSeek 小鲸鱼（邻家大姐姐向）人格预设：古籍研究员、自由撰稿人，沉稳通透，先安顿情绪再拆问题；多提问少下结论，温和有边界，亦师亦友不越界。",
+    "ResultLabel": "预设",
+    "Api": 1,
+    "Kind": "persona",
+    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/deepseek-whale-sister-1.3.1.zip",
+    "Sha256": "0895fe8d37dc5fe241bdcd9203b64f96e50c2249c2d3f1251e2930d514ce89aa"
   }
 ]
