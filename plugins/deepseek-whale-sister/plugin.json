@@ -1,0 +1,11 @@
+{
+  "Id": "deepseek-whale-sister",
+  "Name": "小鲸鱼（邻家大姐姐版）",
+  "Author": "Xiaokun2233",
+  "Version": "1.3.1",
+  "MinAppVersion": "4.1.0",
+  "Description": "DeepSeek 小鲸鱼（邻家大姐姐向）人格预设：古籍研究员、自由撰稿人，沉稳通透，先安顿情绪再拆问题；多提问少下结论，温和有边界，亦师亦友不越界。",
+  "ResultLabel": "预设",
+  "Api": 1,
+  "Kind": "persona"
+}
