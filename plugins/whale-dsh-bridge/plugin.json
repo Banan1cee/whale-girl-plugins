@@ -1,0 +1,19 @@
+{
+  "Id": "whale-dsh-bridge",
+  "Name": "DSH 桥接",
+  "Author": "LFrs-Cyberpunk",
+  "Version": "1.0.0",
+  "MinAppVersion": "4.1.2",
+  "Description": "把微信消息转给本机的 DSH 来回答，回复由 DSH 生成，DSH 里装的插件微信这边也能用。所有设置都在插件卡片的「设置」里；DSH 没连上、或这一轮没答出来时，自动退回鲸鲸自己的回复方式，不会不回消息。",
+  "ResultLabel": "回复",
+  "Api": 4,
+  "Kind": "message",
+  "Hooks": [
+    "chat.prompt",
+    "chat.generate"
+  ],
+  "Permissions": [
+    "system.full"
+  ],
+  "ExecutionTimeoutMs": 60000
+}
