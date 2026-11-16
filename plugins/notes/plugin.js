@@ -29,7 +29,7 @@ const DEFAULT_MAX_ITEM = 5000;
 const MAX_ITEMS = 5000;
 const DEFAULT_READ_LIMIT = 10;
 const PICK_TTL_MS = 60 * 1000;
-const UNDO_TTL_MS = 10 * 60 * 1000;
+const UNDO_TTL_MS = 24 * 60 * 60 * 1000;   // 撤销窗口放一整天，误删隔一会儿也能回来
 
 /* ------------------------------------------------------------------ */
 /* 小工具                                                              */
@@ -663,7 +663,7 @@ function doDeleteOne(input, cfg, dir, index, id, me) {
   const cat = CAT_BY_KEY[item.cat] || CAT_BY_KEY.memo;
   return {
     text: '已删除「' + cat.name + '」里的一条：\n' + oneLine(item.text, 80)
-      + '\n' + Math.round(UNDO_TTL_MS / 60000) + ' 分钟内发 /delete undo 可以恢复。',
+      + '\n' + Math.round(UNDO_TTL_MS / 3600000) + ' 小时内发 /delete undo 可以恢复。',
     state: mergeState(input, { delPick: null }),
   };
 }
@@ -684,31 +684,49 @@ function doDelete(input, cfg, raw) {
     };
   }
 
-  // 撤销上一次删除，只看自己删的
+  // 撤销删除。一次只回一条，从最近删的开始往回走。
   if (/^(undo|撤销|恢复|回退)$/i.test(query)) {
-    const candidates = index.items
+    const deleted = index.items
       .filter(item => item.deleted && str(item.by).trim() === me && Number.isFinite(Number(item.deletedAt)))
       .sort((a, b) => Number(b.deletedAt) - Number(a.deletedAt));
-    const last = candidates[0];
-    if (!last) return { text: '没有可恢复的删除记录。' };
-    if (Date.now() - Number(last.deletedAt) > UNDO_TTL_MS) {
-      return {
-        text: '最近一次删除是 ' + fmtTime(Number(last.deletedAt)) + '，已经超过 '
-          + Math.round(UNDO_TTL_MS / 60000) + ' 分钟，不做恢复。\n'
-          + '确实需要的话，去 index.json 里把那条的 deleted 字段去掉。',
-      };
+
+    const alive = deleted.filter(item => Date.now() - Number(item.deletedAt) <= UNDO_TTL_MS);
+    const last = alive[0];
+
+    if (!last) {
+      if (deleted.length) {
+        const hours = Math.round(UNDO_TTL_MS / 3600000);
+        return {
+          text: '最近一次删除是 ' + fmtTime(Number(deleted[0].deletedAt)) + '，超过可撤销时限（' + hours + ' 小时）。\n'
+            + '确实要找回，去 index.json 里把那条的 deleted 字段去掉。',
+        };
+      }
+      return { text: '没有可恢复的删除记录。' };
     }
+
     delete last.deleted;
     delete last.deletedAt;
     delete last.deletedBy;
+
+    let saveFailed = null;
     try {
       saveIndex(dir, index);
     } catch (e) {
-      return { text: '写索引失败（' + (e && e.code ? e.code : 'unknown') + '），没恢复成。' };
+      saveFailed = e && e.code ? e.code : 'unknown';
     }
+    if (saveFailed) return { text: '写索引失败（' + saveFailed + '），没恢复成。' };
     renderAll(dir, index.items);
+
     const cat = CAT_BY_KEY[last.cat] || CAT_BY_KEY.memo;
-    return { text: '已恢复「' + cat.name + '」里的这一条：\n' + oneLine(last.text, 80) };
+    const lines = ['已恢复「' + cat.name + '」里的这一条：', oneLine(last.text, 80)];
+
+    // 关键提示：还有更早的删除没恢复，不说明的话用户会以为撤销只有一次
+    const left = alive.length - 1;
+    if (left > 0) {
+      lines.push('');
+      lines.push('还有 ' + left + ' 条更早的删除可以恢复，再发一次 /delete undo。');
+    }
+    return { text: lines.join('\n') };
   }
 
   // 纯数字：从上次列出的候选里挑
@@ -854,7 +872,7 @@ const HELP = [
   '/read 3          读最近第 3 条全文',
   '',
   '/delete 关键词   搜出来列编号，回 /delete 编号 删',
-  '/delete undo     撤销上一次删除',
+  '/delete undo     撤销删除，连发可逐条往回恢复',
   '',
   '/whoami          看宿主给了哪些字段（确认有没有 wxid）',
   '',
