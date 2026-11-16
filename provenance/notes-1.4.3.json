@@ -1,0 +1,11 @@
+{
+  "publisher": {
+    "login": "zh-hang",
+    "id": 70639586
+  },
+  "source": {
+    "repository": "zh-hang/whale-girl-plugin-note",
+    "commit": "ff6e51c4743f395d16b01de5dafa66bbb81f6545",
+    "path": "plugins/notes"
+  }
+}

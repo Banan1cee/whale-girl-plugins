@@ -1,0 +1,19 @@
+{
+  "Id": "notes",
+  "Name": "随手记",
+  "Author": "zh-hang",
+  "Version": "1.4.3",
+  "MinAppVersion": "4.1.2",
+  "Description": "【安装前必读】先在鲸鲸「插件市场」页顶部勾选「启用 JavaScript 插件（实验性，完整系统权限）」，再从「插件市场 → 从本地安装」装本 ZIP 并确认 system.full 授权；不开总开关插件不会加载，也不报错。需 4.1.2 以上。命令：/record 记一条并自动归类；/read 读回来，支持今天、类别、关键词、第 N 条；/delete 删记录，命中多条列编号、回编号删，列出候选后直接回数字即可删除，软删除且可 undo；/whoami 探测宿主给了哪些字段。每人只看得到自己记的：/read 和 /delete 都按记录的 by（wxid）隔离，群里多人共用一个机器人也互相看不见，搜索、编号、撤销都只在自己那份里算。搜到的记录只有一条时直接给全文，多条才列表；长内容会自动切成多段补发，补发失败时按提示用 /read 条号 段号 翻页。全部文件只写在插件数据目录的 note/ 下，命令不接受路径参数，不调模型、不写日志、不联网。",
+  "ResultLabel": "记录",
+  "Api": 4,
+  "Kind": "message",
+  "Hooks": [
+    "chat.generate"
+  ],
+  "Permissions": [
+    "system.full"
+  ],
+  "ExecutionTimeoutMs": 20000,
+  "IntervalSeconds": 60
+}
