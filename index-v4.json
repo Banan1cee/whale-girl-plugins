@@ -22,6 +22,30 @@
     "Sha256": "fcaf89d30971dff462916aa9aba67972ba481e1e58dff2b9817e4d7a58603315"
   },
   {
+    "Id": "ruiping",
+    "Name": "锐评",
+    "Author": "Peelorange233",
+    "Version": "1.1.0",
+    "MinAppVersion": "4.1.6",
+    "Description": "【安装前必读】先在「插件市场」页顶部打开「启用 JavaScript 插件（实验性，完整系统权限）」总开关，再「插件市场 → 从本地安装」本 ZIP 并确认 system.full 授权；不开总开关插件不会被加载。需鲸鲸 4.1.6 或以上。搜索 API：在「设置 → API 接入 → 搜索」打开总开关并添加 DeepSeek / 知乎（可选）；不开也能用，走本地 Bing/360。用法：私聊或 @ 机器人说「锐评一下昨天湖人输球」，插件先联网检索事实，再用一句金句或暴论锐评真实事件/结果；来源标注 DeepSeek/知乎/本地，知乎按观点、不当事实；数字与资料对不上会被删，证据不足直接说「不锐评」。卡片「设置 → 运行一次」输入事件可看 JSON。设置项都在卡片「设置」的 JSON 里，留空 {} 即默认。不发消息、不写聊天记录、不改宿主配置；每次锐评消耗一次联网检索和一次模型调用。",
+    "ResultLabel": "锐评结果",
+    "Api": 4,
+    "Kind": "message",
+    "Hooks": [
+      "chat.search",
+      "chat.pre_reply",
+      "chat.generate",
+      "tool.run"
+    ],
+    "Permissions": [
+      "system.full"
+    ],
+    "ExecutionTimeoutMs": 90000,
+    "IntervalSeconds": 60,
+    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/ruiping-1.1.0.zip",
+    "Sha256": "72766ff950e06fcfbf48c30782b6b02734b52d8949095cfe9ce26e7d5a4a6cb3"
+  },
+  {
     "Id": "voice-tone",
     "Name": "语音语气",
     "Author": "Jy-Levent",
