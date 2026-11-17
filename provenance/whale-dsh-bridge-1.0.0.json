@@ -1,0 +1,11 @@
+{
+  "publisher": {
+    "login": "LFrs-Cyberpunk",
+    "id": 357450428
+  },
+  "source": {
+    "repository": "LFrs-Cyberpunk/whale-dsh-bridge-source",
+    "commit": "e69fd2067486aba93864d629426d44dd8dd3b8a5",
+    "path": "whale-dsh-bridge"
+  }
+}
