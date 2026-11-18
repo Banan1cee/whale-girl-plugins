@@ -578,7 +578,8 @@ function parseOrder(text) {
     rest = rest.slice(0, noteMatch.index).trim();
   }
   let artist = '';
-  const sep = /\s+[-—–]\s+|\s+|\s*[·|｜]\s*/.exec(rest);
+  // 只在明确的「空格+分隔符+空格」处拆原唱；空格本身属于歌名（See You Again）。
+  const sep = /\s+[-—–·|｜]\s+|\s*[·|｜]\s*/.exec(rest);
   if (sep && sep.index > 0) {
     artist = rest.slice(sep.index + sep[0].length).trim();
     rest = rest.slice(0, sep.index).trim();
@@ -816,6 +817,7 @@ async function handleSing(whale, message, settings, wanted) {
 }
 
 module.exports = {
+  parseOrder,
   hooks: {
     async 'chat.pre_reply'(input) {
       const whale = input.whale;

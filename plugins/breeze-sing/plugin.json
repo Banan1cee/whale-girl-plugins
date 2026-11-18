@@ -2,7 +2,7 @@
   "Id": "breeze-sing",
   "Name": "Breezeblue 翻唱",
   "Author": "Mz'yuu",
-  "Version": "0.6.2",
+  "Version": "0.6.3",
   "MinAppVersion": "4.1.2",
   "Description": "群聊点歌后自动搜索音源、切 54 秒副歌，用 breezeblue 音色经本地 seed-vc 翻唱并把语音发回群里。依赖本机 %USERPROFILE%\\whale-cover 的 Python/seed-vc/ffmpeg 与 WhaleGirl 本地语音补丁，不是纯 JS 单文件插件；首次使用需先配置引擎与参考音。",
   "ResultLabel": "翻唱语音",
