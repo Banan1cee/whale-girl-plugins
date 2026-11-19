@@ -152,7 +152,7 @@
 
 ```
 plugin.json          清单（Api 4 / Kind tool / 4 个钩子 / system.full）
-plugin.js            全部逻辑，约 800 行，零第三方依赖
+plugin.js            全部逻辑，约 1300 行，零第三方依赖
 dist/care-plus-0.7.1.zip   可安装包（根目录仅 plugin.json + plugin.js）
 dev/test.js          纯逻辑自测（30 项，不联网）
 dev/takeover-test.js 接管官方 care 的自测（打桩，不改真实配置）
