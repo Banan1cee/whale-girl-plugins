@@ -22,6 +22,30 @@
     "Sha256": "55a23fad1c1fd35a51c3305526910b5090ab920263c6d44577409a6e6815e442"
   },
   {
+    "Id": "care-plus",
+    "Name": "主动搭话增强",
+    "Author": "kelin",
+    "Version": "0.7.1",
+    "MinAppVersion": "4.1.2",
+    "Description": "【安装前必读】先在「插件市场」页顶部勾选「启用 JavaScript 插件（实验性，完整系统权限）」，再「插件市场 → 从本地安装」本 ZIP 并确认 system.full 授权；不开总开关插件不会被加载。需鲸鲸 4.1.2 或以上。接管官方主动搭话：支持主人私聊、其他人的私聊和群聊，收件人、时段、间隔、每天上限全部读官方「主动与提醒」页，启用即自动关掉官方 care，装上即用、无需配置。效果：搭话的提示词换成完整人设＋人物卡里未收尾的话题/事实/事件＋她自己日记的末段，不再是官方那 6 行独立模板；开口时机改成每次真随机（默认 25~300 分钟，群聊再乘 1.6），锚点是你最后一条消息的沉默时长，而不是上次搭话时间。于是不会刚聊完又按点冒一句，语气、长度、时间点每轮都不一样，明显降低「到点就发」的人机感。连续几次没被回还会改语气，该收手就收手。",
+    "ResultLabel": "试跑结果",
+    "Api": 4,
+    "Kind": "tool",
+    "Hooks": [
+      "app.start",
+      "timer.tick",
+      "app.stop",
+      "tool.run"
+    ],
+    "Permissions": [
+      "system.full"
+    ],
+    "ExecutionTimeoutMs": 90000,
+    "IntervalSeconds": 300,
+    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/care-plus-0.7.1.zip",
+    "Sha256": "3db0ddb8532f9eb55711a612f5e992f54954733d8a7e5d4eaa472a03d5e6b04a"
+  },
+  {
     "Id": "codebuddy-cli-model",
     "Name": "CodeBuddy CLI 直连",
     "Author": "Grace-alan510",
