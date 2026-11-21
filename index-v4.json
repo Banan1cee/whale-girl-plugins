@@ -236,5 +236,26 @@
     "ExecutionTimeoutMs": 60000,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/whale-dsh-bridge-1.0.0.zip",
     "Sha256": "2832186c74a6343d515c54388f7dc930f0b5fd6baa1eb316cf5789474fff9601"
+  },
+  {
+    "Id": "xmding",
+    "Name": "小咪叮",
+    "Author": "atroy",
+    "Version": "1.0.6",
+    "MinAppVersion": "4.1.2",
+    "appEpoch": 1,
+    "Description": "按群名 / 人名 / 备注 / wxid 或会话 ID，向指定群聊或个人主动发消息，支持文字、语音与图片，支持 dryRun 预检和投递回执查询。",
+    "ResultLabel": "发送结果",
+    "Api": 4,
+    "Kind": "tool",
+    "Hooks": [
+      "tool.run"
+    ],
+    "Permissions": [
+      "system.full"
+    ],
+    "ExecutionTimeoutMs": 45000,
+    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/xmding-1.0.6.zip",
+    "Sha256": "022ce3164114579bb518b796e1d2a5ebb946e691f8f187395070f40201dff4e6"
   }
 ]
