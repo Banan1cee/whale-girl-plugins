@@ -10,7 +10,9 @@ on:
     paths:
       - 'plugins/**'
       - 'packages/**'
+      - 'discussion-issues.json'
       - 'scripts/build-index.js'
+      - 'scripts/sync-package-release.js'
       - 'index*.json'
 
 permissions:
@@ -63,3 +65,22 @@ jobs:
           git add index*.json
           git commit -m 'market: 自动同步目录（由 plugins/ 与 packages/ 生成）'
           git push
+
+  sync-package-release:
+    name: 同步用于下载统计的安装包（main）
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: market-package-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: 发布尚未同步的 ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/sync-package-release.js
