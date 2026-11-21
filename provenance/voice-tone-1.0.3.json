@@ -1,0 +1,11 @@
+{
+  "publisher": {
+    "login": "Jy-Levent",
+    "id": 351476603
+  },
+  "source": {
+    "repository": "Jy-Levent/whale-girl-plugins",
+    "commit": "32f1f5355ff27145fab21656ad5db91e9cb25557",
+    "path": "plugins/voice-tone"
+  }
+}
