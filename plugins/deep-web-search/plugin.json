@@ -1,0 +1,15 @@
+{
+  "Id": "deep-web-search",
+  "Name": "深度联网搜索",
+  "Author": "Peelorange233",
+  "Version": "1.0.0",
+  "MinAppVersion": "4.1.6",
+  "Description": "鲸鲸的深度联网搜索：每条消息先判断「这句是否在问具体既定事实」（比分/赛程、新闻事件、价格行情、天气、政策法规、人物近况、数据统计、产品发布等），只有需要时才联网，闲聊、情绪、观点和创作不打扰。检索优先走宿主已配置的搜索 API（DeepSeek /v1/tools/search），结果按来源可信度、时间与去重整理成「一句结论 + 关键事实 + 来源时间」，再附一句大肥鱼口吻提示，方便鲸鲸直接锐评或下判断。篮球问题先查 ESPN 公开记分牌，按用户时区核对日期，给出具体比分、胜负与比赛状态。配置、授权、试查都在卡片「设置」；查询词会发给搜索服务与公开网页，不写日志、不发消息、不调模型。",
+  "ResultLabel": "搜索整理",
+  "Api": 4,
+  "Kind": "message",
+  "Hooks": ["chat.search", "chat.search_result", "tool.run"],
+  "Permissions": ["system.full"],
+  "ExecutionTimeoutMs": 60000,
+  "IntervalSeconds": 60
+}
