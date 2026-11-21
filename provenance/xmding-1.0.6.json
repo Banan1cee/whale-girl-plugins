@@ -1,0 +1,11 @@
+{
+  "publisher": {
+    "login": "evilkong",
+    "id": 1566805
+  },
+  "source": {
+    "repository": "evilkong/whale-girl-plugins",
+    "commit": "5e6dfc442faa654ba0a4e3cc65f038ff7130508e",
+    "path": "plugins/xmding"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "Id": "xmding",
+  "Name": "小咪叮",
+  "Author": "atroy",
+  "Version": "1.0.6",
+  "MinAppVersion": "4.1.2",
+  "appEpoch": 1,
+  "Description": "按群名 / 人名 / 备注 / wxid 或会话 ID，向指定群聊或个人主动发消息，支持文字、语音与图片，支持 dryRun 预检和投递回执查询。",
+  "ResultLabel": "发送结果",
+  "Api": 4,
+  "Kind": "tool",
+  "Hooks": ["tool.run"],
+  "Permissions": ["system.full"],
+  "ExecutionTimeoutMs": 45000
+}
