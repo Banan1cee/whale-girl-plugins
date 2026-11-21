@@ -36,6 +36,10 @@ const LEAD_WORDS = ['唉', '哎', '啧', '哼', '算了', '无所谓'];
 // 这样插件能算准「这条回复一定会被发成语音」，避免给文字回复加上音效标签。
 const REQUEST = /(?:发|来|说|讲|回复)(?:给我|个|一条|一句|句|段|一段|条|一下|点|一段话|个回复|次|一)?\s*语音|用语音(?:回|说|讲)|语音(?:回我|回复|说一句)/;
 const NEGATIVE = /不要|别(?:再)?|不想|不用|不能|怎么|如何|他说|她说|有人说|关闭|取消|["“”‘’]/;
+// 「没写"语音"两个字、但明显是在要声音」的说法（在 REQUEST 之外补一层）
+// —— 这类以前会被当成普通聊天掉进概率骰子，用户看着像「我要语音她怎么打字」
+const EXTRA_VOICE = /(?:别|不用|不要)(?:再)?打字|打字太慢|直接说|说给我听|说句话|听你说|听你的声音|听听你的?声音|语音条|录(?:一)?段|发段录音|用嘴说|说话给我听|想听你|想听(?:你)?(?:撒|哄|唱|笑|叫|哼|念)/;
+
 const TEXT_ONLY = /(?:不要|别|不用|不想|取消|关闭).{0,12}语音|语音.{0,8}(?:不要|取消|关闭)|(?:用|只要|只用).{0,3}(?:文字|文本)|(?:文字|文本)回复/;
 
 /** 内置默认预设：与分享包 voice-presets.json 完全一致，预设文件不存在时自动生成；已存在（哪怕损坏）绝不覆盖。 */
@@ -378,6 +382,22 @@ function ensurePresetFile() {
 /** 概率覆盖的状态文件（放在插件数据目录，随插件走）。 */
 const STATE_FILE = path.join(whale.paths.pluginData, 'prob-state.json');
 
+/** 设置页读数字项（ctx.settings 由「插件市场 → 已安装 → 设置」写入）。 */
+function numSetting(ctx, key, fallback) {
+  const raw = ctx && ctx.settings ? ctx.settings[key] : undefined;
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** 设置页读布尔项。 */
+function boolSetting(ctx, key, fallback) {
+  const raw = ctx && ctx.settings ? ctx.settings[key] : undefined;
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  if (typeof raw === 'boolean') return raw;
+  return !/^(0|false|no|off)$/i.test(String(raw));
+}
+
 function readState() {
   try {
     const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
@@ -549,7 +569,7 @@ function wantsVoiceExplicit(incoming) {
   if (TEXT_ONLY.test(core)) return false;
   // 只排除真正的转述，不再因为引号或「别」而否决
   if (/他说|她说|有人说|听说|别人说/.test(core)) return false;
-  return REQUEST.test(core);
+  return REQUEST.test(core) || EXTRA_VOICE.test(core);
 }
 
 /**
@@ -575,6 +595,7 @@ exports.hooks = {
   // 而不是等回复生成后再靠清洗补救（不修改人设文件，仅本次请求生效）。
   'chat.prompt': function (ctx) {
     try {
+      if (!boolSetting(ctx, 'injectTagRules', true)) return undefined;
       const system = String((ctx && ctx.system) || '');
       if (!system || system.indexOf('【语音音效标签') >= 0) return undefined;
       return { system: system + '\n\n' + TAG_RULES_PROMPT };
@@ -583,10 +604,25 @@ exports.hooks = {
     }
   },
 
+  // 消息发送完成后立刻还原 Probability。
+  // before_send 里临时改的 100/0 只为让「这一条」按插件决定走；
+  // gateway 是 await send() 成功之后才抛 dispatched，此时桥接已经读完文件，
+  // 在这里还原最安全——以前只在「下一条消息」开头还原，不发消息就会一直卡在临时值。
+  'chat.dispatched': function () {
+    try {
+      restoreProbability();
+    } catch {
+      /* 还原失败不影响发送结果 */
+    }
+    return undefined;
+  },
+
   'chat.before_send': async function (ctx) {
     try {
       // 每条消息开头先把上一条临时覆盖的 Probability 还原，否则 100 会被误当成用户设置
       restoreProbability();
+      // 设置页总开关：关掉后完全不干预（不改语音方式、不加标签、不写文件）
+      if (!boolSetting(ctx, 'enabled', true)) return undefined;
       const raw = String(ctx && ctx.text == null ? '' : ctx.text).trim();
       if (!raw) return undefined;
       const text = raw;
@@ -598,7 +634,9 @@ exports.hooks = {
         data = readJson(PRESET_FILE);
       }
       if (!data || !data.presets) return undefined;
-      const preset = data.presets[String(data.active || '')];
+      // 设置页可以强制指定预设，留空则用 voice-presets.json 里的 active
+      const prefer = String((ctx && ctx.settings && ctx.settings.preset) || '').trim();
+      const preset = (prefer && data.presets[prefer]) || data.presets[String(data.active || '')];
       if (!preset) return undefined;
 
       // 1) 语气指令：每次回复都同步，文字与语音都吃这个设置
@@ -627,7 +665,9 @@ exports.hooks = {
         wantVoice = true;
       } else {
         // 中间概率：插件接管，按预设 voiceChance 掷骰子，再强制 bridge 跟随
-        const presetChance = Number(preset.voiceChance);
+        // 设置页可覆盖语音概率（-1 = 用预设自带的 voiceChance）
+        const override = numSetting(ctx, 'voiceChanceOverride', -1);
+        const presetChance = override >= 0 && override <= 100 ? override : Number(preset.voiceChance);
         const target = Number.isFinite(presetChance) ? presetChance : userChance;
         wantVoice = Number.isFinite(target) && target > 0 && Math.random() * 100 < target;
       }
