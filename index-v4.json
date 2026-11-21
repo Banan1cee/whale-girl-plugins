@@ -18,6 +18,7 @@
     ],
     "ExecutionTimeoutMs": 20000,
     "IntervalSeconds": 10,
+    "DiscussionIssue": 32,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/breeze-sing-0.6.3.zip",
     "Sha256": "55a23fad1c1fd35a51c3305526910b5090ab920263c6d44577409a6e6815e442"
   },
@@ -42,6 +43,7 @@
     ],
     "ExecutionTimeoutMs": 90000,
     "IntervalSeconds": 300,
+    "DiscussionIssue": 33,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/care-plus-0.7.1.zip",
     "Sha256": "3db0ddb8532f9eb55711a612f5e992f54954733d8a7e5d4eaa472a03d5e6b04a"
   },
@@ -64,6 +66,7 @@
     ],
     "ExecutionTimeoutMs": 120000,
     "IntervalSeconds": 60,
+    "DiscussionIssue": 34,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/codebuddy-cli-model-1.2.0.zip",
     "Sha256": "fcaf89d30971dff462916aa9aba67972ba481e1e58dff2b9817e4d7a58603315"
   },
@@ -85,6 +88,7 @@
     ],
     "ExecutionTimeoutMs": 20000,
     "IntervalSeconds": 60,
+    "DiscussionIssue": 40,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/notes-1.4.4.zip",
     "Sha256": "dbd25f69795d348515e9a632da653f7b6f1522840ed1461c2b8c32329b6e8888"
   },
@@ -109,6 +113,7 @@
     ],
     "ExecutionTimeoutMs": 90000,
     "IntervalSeconds": 60,
+    "DiscussionIssue": 41,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/ruiping-1.1.0.zip",
     "Sha256": "72766ff950e06fcfbf48c30782b6b02734b52d8949095cfe9ce26e7d5a4a6cb3"
   },
@@ -191,6 +196,7 @@
         "Description": "搭话后这么多分钟内目标没回话就算被无视一次，1~240。改短→更快判定更快生气"
       }
     ],
+    "DiscussionIssue": 43,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/smart-care-1.0.0.zip",
     "Sha256": "7ca59d7ffa9edfeac8df900f475caa4674beba10164256424f8a7dea5c868dbf"
   },
@@ -213,6 +219,7 @@
     ],
     "ExecutionTimeoutMs": 20000,
     "IntervalSeconds": 60,
+    "DiscussionIssue": 45,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/voice-tone-1.0.2.zip",
     "Sha256": "368d71bbb18953f880815b038a12474ce29503cd229305cf9d88302c358365ad"
   },
@@ -234,6 +241,7 @@
       "system.full"
     ],
     "ExecutionTimeoutMs": 60000,
+    "DiscussionIssue": 46,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/whale-dsh-bridge-1.0.0.zip",
     "Sha256": "2832186c74a6343d515c54388f7dc930f0b5fd6baa1eb316cf5789474fff9601"
   },
@@ -255,6 +263,7 @@
       "system.full"
     ],
     "ExecutionTimeoutMs": 45000,
+    "DiscussionIssue": 47,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/xmding-1.0.6.zip",
     "Sha256": "022ce3164114579bb518b796e1d2a5ebb946e691f8f187395070f40201dff4e6"
   }

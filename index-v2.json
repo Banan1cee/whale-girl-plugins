@@ -10,6 +10,7 @@
     "Api": 2,
     "Kind": "tool",
     "HostAction": "chat.summary",
+    "DiscussionIssue": 36,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/daily-digest-1.0.0.zip",
     "Sha256": "6430638dc624fd2b2693218c4dda5433c7cd8ced1f39270bd0db96a48e45f878"
   }

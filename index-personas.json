@@ -9,6 +9,7 @@
     "ResultLabel": "预设",
     "Api": 1,
     "Kind": "persona",
+    "DiscussionIssue": 37,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/deepseek-whale-persona-1.1.6.zip",
     "Sha256": "903b37e51f4fe2f1c0df595ad8f300bb683d0aca43fe57c236fd1b5f3efbec50"
   },
@@ -22,6 +23,7 @@
     "ResultLabel": "预设",
     "Api": 1,
     "Kind": "persona",
+    "DiscussionIssue": 38,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/deepseek-whale-sister-1.3.1.zip",
     "Sha256": "0895fe8d37dc5fe241bdcd9203b64f96e50c2249c2d3f1251e2930d514ce89aa"
   },
@@ -35,6 +37,7 @@
     "ResultLabel": "预设",
     "Api": 1,
     "Kind": "persona",
+    "DiscussionIssue": 42,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/ruiping-persona-1.1.0.zip",
     "Sha256": "3733a276230ee689bb1e0bab4d82e041f9df8d89cea3dc132e388d55eb5e1992"
   }
