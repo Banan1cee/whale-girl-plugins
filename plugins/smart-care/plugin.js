@@ -1018,40 +1018,6 @@ async function handleAngryTick(ctx) {
   } catch { /* 记账失败不影响已发消息 */ }
 }
 
-// ================= 面板状态（tool.run，A方案：本体开关联动 + 账本软压）=================
-function readConfig() {
-  try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8').replace(/^\uFEFF/, '')); } catch { return {}; }
-}
-/** 面板状态文案：只看不改（A方案下插件不碰本体开关，靠账本软压避免双发） */
-function panelStatus(ctx) {
-  const st = readState();
-  const cfg = readConfig();
-  const shared = readCareState();
-  const log = Array.isArray(st.autoLog) ? st.autoLog.slice(0, 5) : [];
-  const care = cfg.care || {};
-  return {
-    ok: true,
-    action: 'status',
-    官方搭话开关: care.enabled === false ? '关（插件也停）' : '开（插件在工作）',
-    本体软压状态: `共享账本 count=${shared.count || 0} / 上限 ${care.maxPerDay ?? '?'}（顶到上限则本体不发，避免双发）`,
-    今日已搭话: log.filter(x => {
-      const d = new Date(x.at); const n = new Date();
-      return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
-    }).length,
-    最近搭话: log.map(x => ({ 时间: new Date(x.at).toLocaleString('zh-CN'), 目标: x.target, 话题: x.topic || '普通关心' })),
-    当前设置: {
-      兴趣话题概率: numSetting(ctx, 'careInterestChance', 80, 0, 100),
-      被无视生气: boolSetting(ctx, 'angryEnabled', true),
-      生气阈值: numSetting(ctx, 'ignoreThreshold', 2, 1, 10),
-      判定窗口分钟: numSetting(ctx, 'ignoreWindowMinutes', 20, 1, 240),
-      搭话生气间隔分钟: numSetting(ctx, 'outboundGapMinutes', OUTBOUND_GAP_DEFAULT, 0, 240),
-    },
-    当前火气: (() => { const c = currentAnger(Date.now(), ctx); return { 生气中: c.active, 等级: c.level + '/3 ' + c.label, 已生气时长: c.active ? Math.round((Date.now() - c.since) / 60000) + '分钟' : '-', 主动搭话: c.active ? '已停(生气中)' : '正常', 说明: c.level >= 3 ? '最高级：已发心寒话，之后不再主动发，需对方道歉才消气' : '' }; })(),
-    怎么控制: '在官方「主动与提醒」页开关：关→插件一起停；开→插件接管搭话。本页只查看状态。',
-    注意: '软压会让官方页显示「今天已发满」；想让本体真发几条，把每天上限调大或清空 data/care-state.json。',
-  };
-}
-
 // ---------------- 钩子 ----------------
 exports.hooks = {
   // 被无视生气①：宿主决定回复时，检查 pending（目标回话→清零 / 超时→streak++），达阈值注入怒气口吻
@@ -1095,11 +1061,5 @@ exports.hooks = {
     } catch {
       return {}; // 任何异常都退回宿主默认行为
     }
-  },
-  // 设置面板（Kind=tool）：{} 看状态 / takeover 接管 / restore 恢复官方
-  // 面板：输入 {} 或任意内容都只返回状态（A方案下开关在官方页，这里不做接管动作）
-  'tool.run': async function (ctx) {
-    try { return panelStatus(ctx); }
-    catch (e) { return { ok: false, action: 'status', error: String(e && e.message || e) }; }
   },
 };
