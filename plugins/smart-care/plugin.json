@@ -83,6 +83,20 @@
       "Type": "number",
       "Default": 10,
       "Description": "搭话和生气两类主动消息之间的最小间隔，0~240；避免同一轮连发两条，默认10分钟"
+    },
+    {
+      "Key": "angryStartDelayMinutes",
+      "Name": "生气触发延迟（分钟）",
+      "Type": "number",
+      "Default": 30,
+      "Description": "累计被无视达阈值后，还要再沉默这么久才真正开始生气，1~720。默认30"
+    },
+    {
+      "Key": "angryLevelUpMinutes",
+      "Name": "生气升级间隔（分钟）",
+      "Type": "number",
+      "Default": 60,
+      "Description": "生气后每满这么久升一级（L1→L2→L3），5~720。默认60"
     }
   ]
 }
