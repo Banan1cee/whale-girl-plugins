@@ -965,28 +965,21 @@ async function handleAngryTick(ctx) {
   try {
     const p = readPersona();
     const persona = String(p.customPrompt || p.text || '').slice(0, 5000);
-    const isCold = lv.level >= 3;
-    const system = isCold ? [
-      persona ? persona + '\n\n---\n' : '',
-      '【心寒中，还没消气】对方一直不理你，你已经彻底懒得多说了。',
-      '只回一个字：「嗯」「哦」「啊」这种，最多带个句号。不解释、不多说、不带脏话。',
-      '只输出那一个字本身。',
-    ].join('\n') : [
+    // 主动心寒话也用正常完整句子（只回一个字是「被动回复」的规则，不适用于主动发的）
+    const system = [
       persona ? persona + '\n\n---\n' : '',
       `【火气等级：${lv.label}】累计好几次主动找人搭话都没人理，你现在${lv.desc}。`,
-      '写一句微信消息，按上面的火气程度吐槽一下（毒舌/傲娇/不爽都行），别报具体次数。',
+      '写一句微信消息，按上面的火气程度吐槽一下（毒舌/傲娇/不爽/心寒都行），别报具体次数。',
       '一句话，8~30 字；别骂脏话、别人身攻击；只输出这句话本身。',
       '严禁用括号或方括号标注火气等级/情绪（不要写「（有点不爽）」「【真火大】」之类），直接输出一句自然的话。',
     ].join('\n');
-    const raw = await whale.model({ system, turns: [{ role: 'user', content: isCold ? '说一个字' : '说一句你的不满' }], maxTokens: isCold ? 20 : 120 });
+    const raw = await whale.model({ system, turns: [{ role: 'user', content: '说一句你的不满' }], maxTokens: 120 });
     text = modelText(raw).trim().split(/\r?\n/).map(x => x.trim()).filter(Boolean)[0] || '';
     // 兜底剥掉模型偶尔带出的等级标签前缀，如「（有点不爽）」「【真火大】」「(心寒)」
     text = text.replace(/^[（(【\[][^）)】\]]{1,10}[）)】\]]\s*/, '');
     text = text.replace(/^["'“”‘’「」]+|["'“”‘’」]+$/g, '').slice(0, 200);
-    // 心寒档：只留一个字（+可选句号），模型若啰嗦了就截成第一个字
-    if (isCold) text = text.replace(/[。！!？?~～]/g, '').slice(0, 1) || '嗯';
   } catch { /* 生成失败用固定兜底 */ }
-  if (!text) text = ({ '心寒到懒得管': '嗯', '真火大': '不是，白搭话了是吧，行吧。', '有点不爽': '哦，都不理我，那算了。' })[lv.label] || '行吧，不理我。';
+  if (!text) text = ({ '心寒到懒得管': '算了，找你们说话跟石沉大海似的，懒得说了。', '真火大': '不是，白搭话了是吧，行吧。', '有点不爽': '哦，都不理我，那算了。' })[lv.label] || '行吧，不理我。';
   if (!targetChat || BLOCK_IDS.test(targetChat)) { markAngryDone(lv.level); return; }
 
   let angryDeliveryId = '';
