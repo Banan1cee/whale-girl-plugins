@@ -269,11 +269,34 @@ const CARE_TIMEOUT = 8000;      // care 接口超时
 const INTEREST_TTL = 5 * 60 * 1000;
 // ---- 被无视生气模块 ----
 const IGNORE_WINDOW_DEFAULT = 20;         // 默认判定窗口（分钟），可在设置里改
-const ANGRY_COOLDOWN_MS = 30 * 60 * 1000; // 生气后冷却，避免连续轰炸（固定30分钟）
+const ANGRY_COOLDOWN_MS = 30 * 60 * 1000; // 生气后发送间隔（每30分钟最多一条）
+const ANGRY_START_DELAY_DEFAULT = 30; // 被无视后要沉默多少分钟才开始生气（设置项 angryStartDelayMinutes）
+const ANGRY_LEVEL_UP_DEFAULT = 60;    // 每生气满多少分钟升一级（设置项 angryLevelUpMinutes）
+/** 生气触发延迟（毫秒），设置项 angryStartDelayMinutes，1~720 分钟 */
+function angryStartDelayMs(ctx) {
+  return Math.max(1, Math.min(720, numSetting(ctx, 'angryStartDelayMinutes', ANGRY_START_DELAY_DEFAULT, 1, 720))) * 60 * 1000;
+}
+/** 生气升级间隔（毫秒），设置项 angryLevelUpMinutes，5~720 分钟 */
+function angryLevelUpMs(ctx) {
+  return Math.max(5, Math.min(720, numSetting(ctx, 'angryLevelUpMinutes', ANGRY_LEVEL_UP_DEFAULT, 5, 720))) * 60 * 1000;
+}
+const ANGRY_MAX_LEVEL = 3;                // 最高三级：发一条心寒话后永久静默，只能道歉消气
+const OUTBOUND_GAP_DEFAULT = 10;          // 搭话与生气之间最小间隔（分钟），避免同一轮连发两条
 /** 读取判定窗口（分钟→毫秒），设置项 ignoreWindowMinutes，范围1~240 */
 function ignoreWindowMs(ctx) {
   const min = numSetting(ctx, 'ignoreWindowMinutes', IGNORE_WINDOW_DEFAULT, 1, 240);
   return min * 60 * 1000;
+}
+/** 搭话/生气共用的「上次主动发消息时间」，用于两者错开，避免同时发 */
+function lastOutboundAt() { return Number(readState().lastOutboundAt) || 0; }
+function markOutbound() { const s = readState(); writeState({ ...s, lastOutboundAt: Date.now() }); }
+function outboundTooSoon(ctx) {
+  const gap = Math.max(0, Math.min(240, numSetting(ctx, 'outboundGapMinutes', OUTBOUND_GAP_DEFAULT, 0, 240)));
+  return gap > 0 && (Date.now() - lastOutboundAt() < gap * 60 * 1000);
+}
+/** 生气一旦开始(angrySince 存在)就不再主动搭话（点名指令除外） */
+function isAngryActive() {
+  return (Number(readAngryState().angrySince) || 0) > 0;
 }
 
 /** 读生气模块状态（与现有 state 共存，不冲掉限流字段） */
@@ -285,26 +308,32 @@ function readAngryState() {
   return {
     root: s,
     pending,                             // 待确认搭话数组（每条独立判定，不再互相覆盖）
-    lastIgnored: ci.lastIgnored || null, // 最近一次被无视的搭话（供 timer.tick 生气用）
+    lastIgnored: ci.lastIgnored || null, // 最近一次被无视的搭话（供生气话选择发送目标）
+    firstIgnoredAt: Number(ci.firstIgnoredAt) || 0, // 第一次被无视的时间（触发延迟的锚点，不被后续覆盖）
     streak: Number(ci.streak) || 0,
     lastAngryAt: Number(ci.lastAngryAt) || 0,
+    angrySince: Number(ci.angrySince) || 0,  // 生气开始时间（等级按 now-angrySince 算）
+    angrySentLevel: Number(ci.angrySentLevel) || 0, // 已发过生气话的最高等级（每级只发一次）
   };
 }
 function writeAngryState(st, patch) {
   const ci = {
     pending: patch.pending !== undefined ? patch.pending : st.pending,
     lastIgnored: patch.lastIgnored !== undefined ? patch.lastIgnored : st.lastIgnored,
+    firstIgnoredAt: patch.firstIgnoredAt !== undefined ? patch.firstIgnoredAt : st.firstIgnoredAt,
     streak: patch.streak !== undefined ? patch.streak : st.streak,
     lastAngryAt: patch.lastAngryAt !== undefined ? patch.lastAngryAt : st.lastAngryAt,
+    angrySince: patch.angrySince !== undefined ? patch.angrySince : st.angrySince,
+    angrySentLevel: patch.angrySentLevel !== undefined ? patch.angrySentLevel : st.angrySentLevel,
   };
   writeState({ ...st.root, careIgnore: ci });
 }
 /** 发搭话后：追加一条待确认（每条独立，不再覆盖之前的） */
-function markCareSent(chatId, targetWxid, text) {
+function markCareSent(chatId, targetWxid, text, isGroup) {
   const st = readAngryState();
   const item = { at: Date.now(), chatId: String(chatId || ''),
     targetWxid: String(targetWxid || ''), name: nameForWxid(String(targetWxid || ''), loadContacts()),
-    text: String(text || '').slice(0, 80) };
+    isGroup: !!isGroup, text: String(text || '').slice(0, 80) };
   const pending = st.pending.concat([item]).slice(-20); // 最多留20条，防止状态膨胀
   writeAngryState(st, { pending });
 }
@@ -320,52 +349,124 @@ function checkPending(ctx) {
   const sender = msg && msg.senderId ? String(msg.senderId) : '';
   const now = Date.now();
   let pending = [], streak = st.streak, lastIgnored = st.lastIgnored;
-  let replied = false, bumped = 0;
+  let firstIgnoredAt = st.firstIgnoredAt;
+  let replied = false, bumped = 0, angerCleared = false;
 
   for (const cur of st.pending) {
-    // 目标本人回话了 → 删这条 + 该目标连续无视清零
+    // 目标本人回话了 → 删这条；是否消气看时间等级：
+    //   level3(最高级) 只有道歉才消气；level1/2 对方回话即消气
     if (sender && sender === String(cur.targetWxid)) {
       replied = true;
-      streak = 0;
-      continue; // 不保留这条
+      const lvNow = angerLevelByTime(st.angrySince, now, ctx);
+      if (lvNow.level >= ANGRY_MAX_LEVEL && !isApology(ctx)) {
+        // 最高级且没道歉 → 继续冷着，不清零
+      } else {
+        streak = 0; lastIgnored = null; firstIgnoredAt = 0; angerCleared = true; // 消气：结束生气状态
+      }
+      continue; // 无论消没消气，这条 pending 都删掉（已回话）
     }
     // 超时且目标没回 → 这条算被无视，streak++
     if (now - Number(cur.at || 0) >= ignoreWindowMs(ctx)) {
       bumped += 1;
       streak += 1;
-      lastIgnored = cur; // 最近一条被无视的（供生气发到对的地方）
+      if (!firstIgnoredAt) firstIgnoredAt = Number(cur.at) || now; // 第一次被无视的时间（不再被覆盖）
+      lastIgnored = cur; // 最近一条被无视的（供生气话选发送目标）
       continue;
     }
     pending.push(cur); // 还在窗口内，保留
   }
-  writeAngryState(st, { pending, streak, lastIgnored });
+  const patch = { pending, streak, lastIgnored, firstIgnoredAt };
+  if (angerCleared) { patch.angrySince = 0; patch.angrySentLevel = 0; patch.lastAngryAt = 0; }
+  writeAngryState(st, patch);
   return { streak, justBumped: bumped > 0, replied };
 }
-/** 是否该生气（开关 + 阈值 + 冷却） */
+/**
+ * 是否该生气 + 当前等级（按时间分级）：
+ *  未生气：streak>=阈值 且 距最后一次被无视超过30min → 开始生气(记 angrySince)，本轮就发 level1 话
+ *  已生气：按 now-angrySince 算等级；每级只发一条，level3 发完后永久静默
+ * @returns {{should:boolean, level:object, justStarted:boolean}}
+ */
 function shouldGetAngry(ctx, strength) {
-  if (!boolSetting(ctx, 'enabled', true) || !boolSetting(ctx, 'angryEnabled', true)) return false;
+  const off = { should: false, level: { level: 0, label: '没事', desc: '' }, justStarted: false };
+  if (!boolSetting(ctx, 'enabled', true) || !boolSetting(ctx, 'angryEnabled', true)) return off;
   const threshold = Math.max(1, Math.min(10, numSetting(ctx, 'ignoreThreshold', 2, 1, 10)));
-  if (strength < threshold) return false;
+  if (strength < threshold) return off;
+  const now = Date.now();
   const st = readAngryState();
-  if (Date.now() - st.lastAngryAt < ANGRY_COOLDOWN_MS) return false;
-  return true;
+
+  if (!st.angrySince) {
+    // 还没开始生气：从「第一次被无视」算起满30分钟才启动。
+    // 不能用 lastIgnored.at——搭话频繁时它总指向最近一条（永远差不到30min），会导致永不生气。
+    let firstAt = st.firstIgnoredAt || 0;
+    // 兼容旧 state：没有 firstIgnoredAt 但有 streak 时，用 lastIgnored.at 兜底补记一次
+    if (!firstAt && st.streak > 0 && st.lastIgnored && st.lastIgnored.at) {
+      firstAt = Number(st.lastIgnored.at);
+      writeAngryState(st, { firstIgnoredAt: firstAt });
+    }
+    if (!firstAt || now - firstAt < angryStartDelayMs(ctx)) return off;
+    // 开始生气：只记 angrySince（作为等级计时锚点）；angrySentLevel 留到真正发成功后由 markAngryDone 记。
+    // 这样即使本轮被发送间隔挡掉，下轮仍会判定为「level1 未发」而补发，不丢生气话。
+    writeAngryState(st, { angrySince: now });
+    return { should: true, level: angerLevelByTime(now, now, ctx), justStarted: true };
+  }
+
+  // 生气中：按时间算等级；每个等级只发一次（升级到新等级才再发）
+  // level3 也会发一条（心寒宣言），之后 angrySentLevel=3 → 永久静默，只能等道歉消气
+  const lv = angerLevelByTime(st.angrySince, now, ctx);
+  if (lv.level <= st.angrySentLevel) return { ...off, level: lv }; // 本级已发过，不重复
+  return { should: true, level: lv, justStarted: false };
 }
-/** 生气后复位：streak 清零、记冷却时间 */
-function markAngryDone() {
+/** 发完生气话：记录已发的等级（每级只发一次；消气靠 checkPending 的回话/道歉） */
+function markAngryDone(level) {
   const st = readAngryState();
-  writeAngryState(st, { streak: 0, lastAngryAt: Date.now() });
+  const lv = Number(level) || 1;
+  writeAngryState(st, { lastAngryAt: Date.now(), angrySentLevel: Math.max(st.angrySentLevel, lv) });
 }
-/** 生气口吻注入 system（chat.prompt 用） */
-const ANGRY_PROMPT = (n) => [
-  '\n\n【现在很火大】你连续 ' + n + ' 次主动搭话都没人理，现在明显不爽、带脾气。',
-  '这次回复要明显带怒气/不耐烦/嫌弃（按你人设的方式），别装没事、别客套。',
-  '可以直接吐槽「又没人理我」「白搭话了」这种意思，但别骂脏话、别人身攻击。',
-  '仍然要回答对方这条消息本身的问题，只是语气带火。',
-].join('\n');
+/** 彻底消气：清空生气状态（对方回话/道歉时调用） */
+function clearAnger(st) {
+  writeAngryState(st || readAngryState(), { streak: 0, angrySince: 0, angrySentLevel: 0, lastAngryAt: 0, lastIgnored: null });
+}
+/** 愤怒分级：streak 越大越气（不报具体数字，避免「又2次没人理」那种蠢话） */
+/** 按「生气已持续多久」算等级：每 angryLevelUpMinutes 升一级，最高3级(发一条后静默,只能道歉消气) */
+function angerLevelByTime(since, now, ctx) {
+  if (!since) return { level: 0, label: '没事', desc: '正常语气' };
+  const steps = Math.max(0, (now - since) / angryLevelUpMs(ctx));
+  if (steps >= 2) return { level: 3, label: '心寒到懒得管', desc: '已经不是生气了，是心寒、爱答不理，语气冷下来，懒得多说；除非对方真心道歉，否则很难消气' };
+  if (steps >= 1) return { level: 2, label: '真火大', desc: '明显不爽、带火气，可以直说「白搭话了」「懒得理了」，但别骂脏话' };
+  return { level: 1, label: '有点不爽', desc: '轻微的嫌弃/无语，语气淡一点、带点刺，别太夸张' };
+}
+/** 当前生气状态：是否生气中 + 时间等级 */
+function currentAnger(now, ctx) {
+  const st = readAngryState();
+  const active = st.angrySince > 0;
+  return { active, since: st.angrySince, streak: st.streak, ...angerLevelByTime(st.angrySince, now || Date.now(), ctx) };
+}
+/** 心寒档(streak>=6)的消气门槛：必须对方道歉才清零。检测常见道歉说法 */
+const APOLOGY_RE = /(对不起|抱歉|不好意思|sorry|我的锅|我的错|不该|不应该|原谅我|我错了|别生气|消消气|我道歉|赔罪)/i;
+function isApology(ctx) {
+  const t = String((ctx && ctx.message && ctx.message.text) || '');
+  return APOLOGY_RE.test(t);
+}
+/** 生气口吻注入 system（chat.prompt 用），按时间等级 */
+const ANGRY_PROMPT = (lv) => {
+  // 心寒档(3级)：在对方道歉前，只用一个字敷衍（嗯/哦/啊），不多说、不解释
+  if (lv.level >= 3) return [
+    '\n\n【心寒中，还没消气】对方一直不理你，你已经彻底懒得多说了。',
+    '这次回复【只准回一个字】：「嗯」「哦」「啊」这类，最多带个句号。',
+    '无论对方说什么、问什么，都不解释、不多说、不接话、不带脏话——就是一个字的敷衍。',
+    '绝对不要写完整句子，不要回应对方的问题内容，只输出那一个字。',
+  ].join('\n');
+  return [
+    '\n\n【现在火气等级 ' + lv.level + '/3：' + lv.label + '】主动搭话一直没人回应，你已经生了一阵子气了，现在' + lv.desc + '。',
+    '这次回复要带上这个程度的情绪（按你人设的方式），别装没事、别客套。',
+    lv.desc + '；但别骂脏话、别人身攻击。',
+    '仍然要回答对方这条消息本身的问题，只是语气带情绪。',
+  ].join('\n');
+};
 
 // ================= 分支 1：点名搭话 =================
 // 原版单一正则（回滚后再做最小修正：动作词表补「聊聊天/聊天」，解决连写吞字）
-const COMMAND_RE = /^\s*(?:去找|找|跟|和|搭话|关心一下|问候一下)\s*([\u4e00-\u9fa5A-Za-z0-9_\-]{1,24}?)\s*(?:聊聊天|聊天|搭话|聊聊|说句话|打个招呼|问好|聊一聊|说两句)?\s*[。！!？?~～]*\s*$/;
+const COMMAND_RE = /^\s*(?:去找|找|跟|和|搭话|关心一下|问候一下)\s*([\u4e00-\u9fa5A-Za-z0-9_\-\.·•]{1,24}?)\s*(?:聊聊天|聊天|搭话|聊聊|说句话|打个招呼|问好|聊一聊|说两句)?\s*[。！!？?~～]*\s*$/;
 const TAIL_ACTION_RE = /(聊聊天|聊天|搭话|聊聊|说句话|打个招呼|问好|聊一聊|说两句)$/;
 const NEGATE_RE = /怎么|为什么|什么|谁是|是不是|要不要|能不能|帮我查|搜索|百度|翻译|解释|意思|nghĩa/;
 const BLOCK_IDS = /^(notifymessage|weixin|fmessage|medianote|floatbottle|gh_|filehelper|wxid_votjw5lxp0h929)/;
@@ -524,7 +625,8 @@ async function handleCareDirect(ctx) {
   if (NEGATE_RE.test(raw)) return null;
   const m = raw.match(COMMAND_RE);
   if (!m) return null;
-  const targetName = m[1].replace(TAIL_ACTION_RE, '').trim();
+  // 去掉尾部动作词和昵称末尾的分隔符（「几度雨停.」→「几度雨停」）
+  const targetName = m[1].replace(TAIL_ACTION_RE, '').replace(/[\.·•\s]+$/, '').trim();
   if (!targetName) return null;
 
   // 主人（回执接收方）= 当前发指令的人，用真实 senderId，不新建会话
@@ -748,27 +850,30 @@ async function handleSearchBoost(ctx, text) {
 async function handleAutoCare(ctx) {
   // 开关：定时搭话独立开关（autoCare），默认开；总开关 enabled 也要开
   if (!boolSetting(ctx, 'enabled', true) || !boolSetting(ctx, 'autoCare', true)) return;
+  if (isAngryActive()) return;   // 生气开始后不再主动搭话（点名指令除外），等消气
+  if (outboundTooSoon(ctx)) return; // 刚发过生气话，错开，避免同一轮连发
 
   const { care, tz } = readCareConfig();
-  if (care.enabled === false) return; // 本体总开关关了，尊重它
+  // A方案：本体开关是唯一总闸——本体开插件才开，本体关插件也关（用户在官方页一刀切）
+  if (care.enabled === false) return;
 
   const now = Date.now();
   // 1) 时间窗判定
   if (!inCareWindow(care.windows, tz)) return;
 
-  // 2) 读共享账本（count 用于共享每日额度；lastTs 不用于间隔判定——那是本体的，我们预支了未来时间）
+  // 2) 读共享账本（只用于软压本体：写完会把 count 顶到上限，绝不能拿它当插件自己的已发数）
   const st = readCareState();
   const today = todayKey(tz);
-  const isToday = String(st.day || '') === today;
-  let sentToday = isToday ? (Number(st.count) || 0) : 0;
 
-  // 3) 每日上限
+  // 3) 每日上限用插件【独立】计数（A方案：共享 count 被顶到 maxPerDay 用于压本体，
+  //    若拿它判定自己会把插件锁死——发几条就停。故单独记账。）
+  const myState = readState();
+  const mySentToday = String(myState.autoDailyDay || '') === today ? (Number(myState.autoDailyCount) || 0) : 0;
   const maxPerDay = Number(care.maxPerDay);
-  if (Number.isFinite(maxPerDay) && maxPerDay > 0 && sentToday >= maxPerDay) return;
+  if (Number.isFinite(maxPerDay) && maxPerDay > 0 && mySentToday >= maxPerDay) return;
 
   // 4) 间隔判定用插件自己的时间戳（独立节奏），不读共享 lastTs：
   //    因为插件写共享账本时会预支 +10min 把 lastTs 推到未来，若用它判定会把自己也挡住。
-  const myState = readState();
   const myLastTs = Number(myState.autoLastTs) || 0;
   const every = Number(care.everyMinutes);
   const jitter = Number(care.jitterMinutes) || 0;
@@ -781,11 +886,13 @@ async function handleAutoCare(ctx) {
   const byWxid = new Map(contacts.map(c => [c.wxid, c]));
   const candidates = whitelist
     .map(w => String(w).trim())
-    .filter(w => w && !BLOCK_IDS.test(w) && !/^\w+@chatroom$/.test(w)) // 先只挑私聊，群另说
+    .filter(w => w && !BLOCK_IDS.test(w)) // 群也允许（走本体白名单；桥接靠 real name 定位会话）
     .map(w => {
       const c = byWxid.get(w) || {};
       const name = String(c.remark || c.name || c.label || '').trim();
-      return { wxid: w, name, lastAt: Number(c.lastAt) || 0 };
+      // 群标记：优先用 contacts-cache 的 isGroup，兜底用 wxid 后缀（@chatroom）
+      const isGroup = !!(c.isGroup || /@chatroom$/i.test(w));
+      return { wxid: w, name, isGroup, lastAt: Number(c.lastAt) || 0 };
     })
     .filter(t => t.name);
   if (!candidates.length) return;
@@ -800,33 +907,44 @@ async function handleAutoCare(ctx) {
   const finalText = String(generated.text || '').slice(0, CARE_MAX_TEXT).trim();
   if (!finalText) return;
 
-  // 7) 发给目标（name 用真实昵称，避免切错会话）
+  // 7) 发给目标（name 用真实昵称，避免切错会话；group 标记告诉桥接这是群会话）
   let sent = false, deliveryId = '', err = '';
   try {
-    const r = await whale.send({ chatId: target.wxid, name: target.name, text: finalText, type: 'text' });
+    const r = await whale.send({ chatId: target.wxid, name: target.name, text: finalText, type: 'text', group: !!target.isGroup });
     sent = !!(r && (r.status === 'queued' || r.status === 'submitted' || r.id));
     deliveryId = String((r && r.id) || '');
   } catch (e) { err = String(e && e.message || e); }
   if (!sent) return; // 失败不记账（本体同理）
 
   // 被无视生气模块：记一条待确认（定时搭话）
-  if (boolSetting(ctx, 'angryEnabled', true)) markCareSent(target.wxid, target.wxid, finalText);
+  if (boolSetting(ctx, 'angryEnabled', true)) markCareSent(target.wxid, target.wxid, finalText, target.isGroup);
 
-  // 8) 写回共享账本：count+1（共享额度），lastTs 预支 +10min 把本体推后，
-  //    这样无论本体间隔是 5min 还是 90min，插件总能按自己的节奏抢先（预支>>间隔差）。
+  // 8) 写回共享账本（A方案：本体保持 enabled=true，用账本把它「软压住」避免双发）：
+  //    count 顶到 maxPerDay → 本体 careDue() 判定「今天发够了」不再发；
+  //    lastTs 预支 +10min → 间隔判定也把本体推后。双保险，本体实际不发声。
   const LEAD_MIN = 10;
-  writeCareState({ ...st, lastTs: Math.floor(now / 1000) + LEAD_MIN * 60, day: today, count: sentToday + 1 });
-  // 插件自己的节奏时间戳（真实发送时间，不预支），用于间隔判定
+  const cap = Number(care.maxPerDay);
+  const sharedCount = (String(st.day || '') === today ? (Number(st.count) || 0) : 0) + 1;
+  const suppressedCount = (Number.isFinite(cap) && cap > 0) ? Math.max(sharedCount, cap) : sharedCount;
+  writeCareState({ ...st, lastTs: Math.floor(now / 1000) + LEAD_MIN * 60, day: today, count: suppressedCount });
+  // 插件自己的节奏：真实发送时间（不预支）+ 独立每日计数（不读共享 count，否则被软压值锁死）
   try {
     const ps = readState();
-    writeState({ ...ps, autoLastTs: now });
+    const sameDay = String(ps.autoDailyDay || '') === today;
+    writeState({
+      ...ps,
+      autoLastTs: now,
+      lastOutboundAt: now, // 与生气共用的间隔标记：刚发了搭话，生气要错开
+      autoDailyDay: today,
+      autoDailyCount: (sameDay ? (Number(ps.autoDailyCount) || 0) : 0) + 1,
+    });
   } catch { /* 记节奏失败只影响精度 */ }
 
   // 9) 记一条到 store，最近动态可见（插件自己记，不等本体）
   try {
     await whale.api('/api/care/sent', {
       method: 'POST',
-      body: { chat: target.wxid, text: finalText, group: false, id: deliveryId || ('plugin-auto-' + now) },
+      body: { chat: target.wxid, text: finalText, group: !!target.isGroup, id: deliveryId || ('plugin-auto-' + now) },
     });
   } catch { /* 记账失败不影响已发消息 */ }
 
@@ -844,37 +962,60 @@ async function handleAutoCare(ctx) {
 /** 连续 N 次搭话被无视、且宿主没触发 chat.prompt 生气时，主动发一句生气话到原会话 */
 async function handleAngryTick(ctx) {
   if (!boolSetting(ctx, 'enabled', true) || !boolSetting(ctx, 'angryEnabled', true)) return;
+  // 顺序很关键（踩过坑）：先 checkPending 累计超时（pending→streak），再 shouldGetAngry 判定并记 angrySince，
+  // 最后才用间隔挡「发送」。若把间隔检查放最前，连续搭话时状态永不累计 → 永远不生气。
   const chk = checkPending(ctx); // 定时无当前消息，只判定超时（ctx 带 settings 用于读窗口）
-  const threshold = Math.max(1, Math.min(10, numSetting(ctx, 'ignoreThreshold', 2, 1, 10)));
-  if (chk.streak < threshold || !shouldGetAngry(ctx, chk.streak)) return;
+  const decision = shouldGetAngry(ctx, chk.streak); // 按时间分级：是否该发 + 当前等级（触发时记 angrySince）
+  if (!decision.should) return;
+  if (outboundTooSoon(ctx)) return; // 只挡本轮发送：状态(angrySince/streak)已存，下轮会补发，不丢
 
   const st = readAngryState();
   const ignored = st.lastIgnored || {};
   const targetChat = String(ignored.chatId || ignored.targetWxid || '');
   const targetName = String(ignored.name || nameForWxid(ignored.targetWxid || '', loadContacts()) || '好友');
+  const targetIsGroup = !!(ignored.isGroup || /@chatroom$/i.test(targetChat)); // 生气话发回原会话类型
 
-  // 生成生气话（按人设）
+  // 生成生气话（按人设 + 时间等级，不报具体次数）
+  const lv = decision.level;
   let text = '';
   try {
     const p = readPersona();
     const persona = String(p.customPrompt || p.text || '').slice(0, 5000);
+    // 主动心寒话也用正常完整句子（只回一个字是「被动回复」的规则，不适用于主动发的）
+    const scene = targetIsGroup ? '这是群里，对「大家/你们」说' : '这是私聊，只对「你」一个人说';
     const system = [
       persona ? persona + '\n\n---\n' : '',
-      `你连续 ${chk.streak} 次主动找人搭话都没人理，现在很火大、带脾气。`,
-      '写一句微信消息，吐槽「又没人理我 / 白搭话了」这种意思，符合你的人设（毒舌/傲娇/不爽都行）。',
+      `【火气等级：${lv.label}】你之前主动找人搭话，好几次都没人理，你现在${lv.desc}。`,
+      '你现在是【主动发消息】，对方并没有来找你、也没回你——不要写「现在想起找我了」「终于回应了」「你来找我了」这种话。',
+      scene + '；写一句吐槽的微信消息，按上面的火气程度（毒舌/傲娇/不爽/心寒都行），别报具体次数。',
       '一句话，8~30 字；别骂脏话、别人身攻击；只输出这句话本身。',
+      '严禁用括号或方括号标注火气等级/情绪（不要写「（有点不爽）」「【真火大】」之类），直接输出一句自然的话。',
     ].join('\n');
     const raw = await whale.model({ system, turns: [{ role: 'user', content: '说一句你的不满' }], maxTokens: 120 });
     text = modelText(raw).trim().split(/\r?\n/).map(x => x.trim()).filter(Boolean)[0] || '';
+    // 兜底剥掉模型偶尔带出的等级标签前缀，如「（有点不爽）」「【真火大】」「(心寒)」
+    text = text.replace(/^[（(【\[][^）)】\]]{1,10}[）)】\]]\s*/, '');
     text = text.replace(/^["'“”‘’「」]+|["'“”‘’」]+$/g, '').slice(0, 200);
   } catch { /* 生成失败用固定兜底 */ }
-  if (!text) text = `不是，我又白搭话了是吧，${chk.streak} 次没人理，行。`.slice(0, 200);
-  if (!targetChat || BLOCK_IDS.test(targetChat)) { markAngryDone(); return; }
+  if (!text) text = (targetIsGroup
+    ? { '心寒到懒得管': '算了，找你们说话跟石沉大海似的，懒得说了。', '真火大': '不是，白搭话了是吧，行吧。', '有点不爽': '哦，都不理我，那算了。' }
+    : { '心寒到懒得管': '算了，找你说话跟石沉大海似的，懒得说了。', '真火大': '不是，白搭话了是吧，行吧。', '有点不爽': '哦，都不理我，那算了。' })[lv.label] || '行吧，不理我。';
+  if (!targetChat || BLOCK_IDS.test(targetChat)) { markAngryDone(lv.level); return; }
 
+  let angryDeliveryId = '';
   try {
-    await whale.send({ chatId: targetChat, name: targetName || '好友', text, type: 'text' });
+    const r = await whale.send({ chatId: targetChat, name: targetName || '好友', text, type: 'text', group: targetIsGroup });
+    angryDeliveryId = String((r && r.id) || '');
   } catch { /* 发送失败不影响其它 */ }
-  markAngryDone();
+  markOutbound(); // 记下这次主动消息时间，搭话会据此错开
+  markAngryDone(lv.level);
+  // 记一条到 store，让生气话也出现在「最近动态」（和正常搭话一样）
+  try {
+    await whale.api('/api/care/sent', {
+      method: 'POST',
+      body: { chat: targetChat, text, group: targetIsGroup, id: angryDeliveryId || ('plugin-angry-' + Date.now()) },
+    });
+  } catch { /* 记账失败不影响已发消息 */ }
 }
 
 // ---------------- 钩子 ----------------
@@ -883,14 +1024,11 @@ exports.hooks = {
   'chat.prompt': async function (ctx) {
     try {
       if (!boolSetting(ctx, 'enabled', true) || !boolSetting(ctx, 'angryEnabled', true)) return {};
-      const chk = checkPending(ctx);
-      const threshold = Math.max(1, Math.min(10, numSetting(ctx, 'ignoreThreshold', 2, 1, 10)));
-      if (chk.streak >= threshold && shouldGetAngry(ctx, chk.streak)) {
-        markAngryDone(); // 只生气一次（timer.tick 的冷却+清零防重复）
-        const base = String((ctx && ctx.system) || '');
-        return { system: base + ANGRY_PROMPT(chk.streak) };
-      }
-      return {};
+      checkPending(ctx); // 对方回话→按等级判定是否消气（最高级要道歉）
+      const cur = currentAnger(Date.now(), ctx);
+      if (!cur.active || cur.level < 1) return {};
+      const base = String((ctx && ctx.system) || '');
+      return { system: base + ANGRY_PROMPT(cur) }; // 生气中，回复带当前时间等级的语气
     } catch { return {}; }
   },
   // 定时主动搭话：读本体 config.care 时间窗 + 共享 care-state 账本，到点发一条带话题的
