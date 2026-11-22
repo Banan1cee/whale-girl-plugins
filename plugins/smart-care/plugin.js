@@ -308,7 +308,8 @@ function readAngryState() {
   return {
     root: s,
     pending,                             // 待确认搭话数组（每条独立判定，不再互相覆盖）
-    lastIgnored: ci.lastIgnored || null, // 最近一次被无视的搭话（供 timer.tick 生气用）
+    lastIgnored: ci.lastIgnored || null, // 最近一次被无视的搭话（供生气话选择发送目标）
+    firstIgnoredAt: Number(ci.firstIgnoredAt) || 0, // 第一次被无视的时间（触发延迟的锚点，不被后续覆盖）
     streak: Number(ci.streak) || 0,
     lastAngryAt: Number(ci.lastAngryAt) || 0,
     angrySince: Number(ci.angrySince) || 0,  // 生气开始时间（等级按 now-angrySince 算）
@@ -319,6 +320,7 @@ function writeAngryState(st, patch) {
   const ci = {
     pending: patch.pending !== undefined ? patch.pending : st.pending,
     lastIgnored: patch.lastIgnored !== undefined ? patch.lastIgnored : st.lastIgnored,
+    firstIgnoredAt: patch.firstIgnoredAt !== undefined ? patch.firstIgnoredAt : st.firstIgnoredAt,
     streak: patch.streak !== undefined ? patch.streak : st.streak,
     lastAngryAt: patch.lastAngryAt !== undefined ? patch.lastAngryAt : st.lastAngryAt,
     angrySince: patch.angrySince !== undefined ? patch.angrySince : st.angrySince,
@@ -327,11 +329,11 @@ function writeAngryState(st, patch) {
   writeState({ ...st.root, careIgnore: ci });
 }
 /** 发搭话后：追加一条待确认（每条独立，不再覆盖之前的） */
-function markCareSent(chatId, targetWxid, text) {
+function markCareSent(chatId, targetWxid, text, isGroup) {
   const st = readAngryState();
   const item = { at: Date.now(), chatId: String(chatId || ''),
     targetWxid: String(targetWxid || ''), name: nameForWxid(String(targetWxid || ''), loadContacts()),
-    text: String(text || '').slice(0, 80) };
+    isGroup: !!isGroup, text: String(text || '').slice(0, 80) };
   const pending = st.pending.concat([item]).slice(-20); // 最多留20条，防止状态膨胀
   writeAngryState(st, { pending });
 }
@@ -347,6 +349,7 @@ function checkPending(ctx) {
   const sender = msg && msg.senderId ? String(msg.senderId) : '';
   const now = Date.now();
   let pending = [], streak = st.streak, lastIgnored = st.lastIgnored;
+  let firstIgnoredAt = st.firstIgnoredAt;
   let replied = false, bumped = 0, angerCleared = false;
 
   for (const cur of st.pending) {
@@ -358,7 +361,7 @@ function checkPending(ctx) {
       if (lvNow.level >= ANGRY_MAX_LEVEL && !isApology(ctx)) {
         // 最高级且没道歉 → 继续冷着，不清零
       } else {
-        streak = 0; lastIgnored = null; angerCleared = true; // 消气：结束生气状态
+        streak = 0; lastIgnored = null; firstIgnoredAt = 0; angerCleared = true; // 消气：结束生气状态
       }
       continue; // 无论消没消气，这条 pending 都删掉（已回话）
     }
@@ -366,12 +369,13 @@ function checkPending(ctx) {
     if (now - Number(cur.at || 0) >= ignoreWindowMs(ctx)) {
       bumped += 1;
       streak += 1;
-      lastIgnored = cur; // 最近一条被无视的（供生气发到对的地方）
+      if (!firstIgnoredAt) firstIgnoredAt = Number(cur.at) || now; // 第一次被无视的时间（不再被覆盖）
+      lastIgnored = cur; // 最近一条被无视的（供生气话选发送目标）
       continue;
     }
     pending.push(cur); // 还在窗口内，保留
   }
-  const patch = { pending, streak, lastIgnored };
+  const patch = { pending, streak, lastIgnored, firstIgnoredAt };
   if (angerCleared) { patch.angrySince = 0; patch.angrySentLevel = 0; patch.lastAngryAt = 0; }
   writeAngryState(st, patch);
   return { streak, justBumped: bumped > 0, replied };
@@ -391,11 +395,18 @@ function shouldGetAngry(ctx, strength) {
   const st = readAngryState();
 
   if (!st.angrySince) {
-    // 还没开始生气：要被无视满30分钟才启动（streak 够了也不急着发作）
-    const lastAt = Number(st.lastIgnored && st.lastIgnored.at) || 0;
-    if (!lastAt || now - lastAt < angryStartDelayMs(ctx)) return off;
-    // 开始生气：记 angrySince；第一次直接发 level1
-    writeAngryState(st, { angrySince: now, angrySentLevel: 1 });
+    // 还没开始生气：从「第一次被无视」算起满30分钟才启动。
+    // 不能用 lastIgnored.at——搭话频繁时它总指向最近一条（永远差不到30min），会导致永不生气。
+    let firstAt = st.firstIgnoredAt || 0;
+    // 兼容旧 state：没有 firstIgnoredAt 但有 streak 时，用 lastIgnored.at 兜底补记一次
+    if (!firstAt && st.streak > 0 && st.lastIgnored && st.lastIgnored.at) {
+      firstAt = Number(st.lastIgnored.at);
+      writeAngryState(st, { firstIgnoredAt: firstAt });
+    }
+    if (!firstAt || now - firstAt < angryStartDelayMs(ctx)) return off;
+    // 开始生气：只记 angrySince（作为等级计时锚点）；angrySentLevel 留到真正发成功后由 markAngryDone 记。
+    // 这样即使本轮被发送间隔挡掉，下轮仍会判定为「level1 未发」而补发，不丢生气话。
+    writeAngryState(st, { angrySince: now });
     return { should: true, level: angerLevelByTime(now, now, ctx), justStarted: true };
   }
 
@@ -875,11 +886,13 @@ async function handleAutoCare(ctx) {
   const byWxid = new Map(contacts.map(c => [c.wxid, c]));
   const candidates = whitelist
     .map(w => String(w).trim())
-    .filter(w => w && !BLOCK_IDS.test(w) && !/^\w+@chatroom$/.test(w)) // 先只挑私聊，群另说
+    .filter(w => w && !BLOCK_IDS.test(w)) // 群也允许（走本体白名单；桥接靠 real name 定位会话）
     .map(w => {
       const c = byWxid.get(w) || {};
       const name = String(c.remark || c.name || c.label || '').trim();
-      return { wxid: w, name, lastAt: Number(c.lastAt) || 0 };
+      // 群标记：优先用 contacts-cache 的 isGroup，兜底用 wxid 后缀（@chatroom）
+      const isGroup = !!(c.isGroup || /@chatroom$/i.test(w));
+      return { wxid: w, name, isGroup, lastAt: Number(c.lastAt) || 0 };
     })
     .filter(t => t.name);
   if (!candidates.length) return;
@@ -894,17 +907,17 @@ async function handleAutoCare(ctx) {
   const finalText = String(generated.text || '').slice(0, CARE_MAX_TEXT).trim();
   if (!finalText) return;
 
-  // 7) 发给目标（name 用真实昵称，避免切错会话）
+  // 7) 发给目标（name 用真实昵称，避免切错会话；group 标记告诉桥接这是群会话）
   let sent = false, deliveryId = '', err = '';
   try {
-    const r = await whale.send({ chatId: target.wxid, name: target.name, text: finalText, type: 'text' });
+    const r = await whale.send({ chatId: target.wxid, name: target.name, text: finalText, type: 'text', group: !!target.isGroup });
     sent = !!(r && (r.status === 'queued' || r.status === 'submitted' || r.id));
     deliveryId = String((r && r.id) || '');
   } catch (e) { err = String(e && e.message || e); }
   if (!sent) return; // 失败不记账（本体同理）
 
   // 被无视生气模块：记一条待确认（定时搭话）
-  if (boolSetting(ctx, 'angryEnabled', true)) markCareSent(target.wxid, target.wxid, finalText);
+  if (boolSetting(ctx, 'angryEnabled', true)) markCareSent(target.wxid, target.wxid, finalText, target.isGroup);
 
   // 8) 写回共享账本（A方案：本体保持 enabled=true，用账本把它「软压住」避免双发）：
   //    count 顶到 maxPerDay → 本体 careDue() 判定「今天发够了」不再发；
@@ -931,7 +944,7 @@ async function handleAutoCare(ctx) {
   try {
     await whale.api('/api/care/sent', {
       method: 'POST',
-      body: { chat: target.wxid, text: finalText, group: false, id: deliveryId || ('plugin-auto-' + now) },
+      body: { chat: target.wxid, text: finalText, group: !!target.isGroup, id: deliveryId || ('plugin-auto-' + now) },
     });
   } catch { /* 记账失败不影响已发消息 */ }
 
@@ -949,15 +962,18 @@ async function handleAutoCare(ctx) {
 /** 连续 N 次搭话被无视、且宿主没触发 chat.prompt 生气时，主动发一句生气话到原会话 */
 async function handleAngryTick(ctx) {
   if (!boolSetting(ctx, 'enabled', true) || !boolSetting(ctx, 'angryEnabled', true)) return;
-  if (outboundTooSoon(ctx)) return; // 刚发过搭话/生气，错开，避免同一轮连发
+  // 顺序很关键（踩过坑）：先 checkPending 累计超时（pending→streak），再 shouldGetAngry 判定并记 angrySince，
+  // 最后才用间隔挡「发送」。若把间隔检查放最前，连续搭话时状态永不累计 → 永远不生气。
   const chk = checkPending(ctx); // 定时无当前消息，只判定超时（ctx 带 settings 用于读窗口）
-  const decision = shouldGetAngry(ctx, chk.streak); // 按时间分级：是否该发 + 当前等级
+  const decision = shouldGetAngry(ctx, chk.streak); // 按时间分级：是否该发 + 当前等级（触发时记 angrySince）
   if (!decision.should) return;
+  if (outboundTooSoon(ctx)) return; // 只挡本轮发送：状态(angrySince/streak)已存，下轮会补发，不丢
 
   const st = readAngryState();
   const ignored = st.lastIgnored || {};
   const targetChat = String(ignored.chatId || ignored.targetWxid || '');
   const targetName = String(ignored.name || nameForWxid(ignored.targetWxid || '', loadContacts()) || '好友');
+  const targetIsGroup = !!(ignored.isGroup || /@chatroom$/i.test(targetChat)); // 生气话发回原会话类型
 
   // 生成生气话（按人设 + 时间等级，不报具体次数）
   const lv = decision.level;
@@ -966,10 +982,12 @@ async function handleAngryTick(ctx) {
     const p = readPersona();
     const persona = String(p.customPrompt || p.text || '').slice(0, 5000);
     // 主动心寒话也用正常完整句子（只回一个字是「被动回复」的规则，不适用于主动发的）
+    const scene = targetIsGroup ? '这是群里，对「大家/你们」说' : '这是私聊，只对「你」一个人说';
     const system = [
       persona ? persona + '\n\n---\n' : '',
-      `【火气等级：${lv.label}】累计好几次主动找人搭话都没人理，你现在${lv.desc}。`,
-      '写一句微信消息，按上面的火气程度吐槽一下（毒舌/傲娇/不爽/心寒都行），别报具体次数。',
+      `【火气等级：${lv.label}】你之前主动找人搭话，好几次都没人理，你现在${lv.desc}。`,
+      '你现在是【主动发消息】，对方并没有来找你、也没回你——不要写「现在想起找我了」「终于回应了」「你来找我了」这种话。',
+      scene + '；写一句吐槽的微信消息，按上面的火气程度（毒舌/傲娇/不爽/心寒都行），别报具体次数。',
       '一句话，8~30 字；别骂脏话、别人身攻击；只输出这句话本身。',
       '严禁用括号或方括号标注火气等级/情绪（不要写「（有点不爽）」「【真火大】」之类），直接输出一句自然的话。',
     ].join('\n');
@@ -979,12 +997,14 @@ async function handleAngryTick(ctx) {
     text = text.replace(/^[（(【\[][^）)】\]]{1,10}[）)】\]]\s*/, '');
     text = text.replace(/^["'“”‘’「」]+|["'“”‘’」]+$/g, '').slice(0, 200);
   } catch { /* 生成失败用固定兜底 */ }
-  if (!text) text = ({ '心寒到懒得管': '算了，找你们说话跟石沉大海似的，懒得说了。', '真火大': '不是，白搭话了是吧，行吧。', '有点不爽': '哦，都不理我，那算了。' })[lv.label] || '行吧，不理我。';
+  if (!text) text = (targetIsGroup
+    ? { '心寒到懒得管': '算了，找你们说话跟石沉大海似的，懒得说了。', '真火大': '不是，白搭话了是吧，行吧。', '有点不爽': '哦，都不理我，那算了。' }
+    : { '心寒到懒得管': '算了，找你说话跟石沉大海似的，懒得说了。', '真火大': '不是，白搭话了是吧，行吧。', '有点不爽': '哦，都不理我，那算了。' })[lv.label] || '行吧，不理我。';
   if (!targetChat || BLOCK_IDS.test(targetChat)) { markAngryDone(lv.level); return; }
 
   let angryDeliveryId = '';
   try {
-    const r = await whale.send({ chatId: targetChat, name: targetName || '好友', text, type: 'text' });
+    const r = await whale.send({ chatId: targetChat, name: targetName || '好友', text, type: 'text', group: targetIsGroup });
     angryDeliveryId = String((r && r.id) || '');
   } catch { /* 发送失败不影响其它 */ }
   markOutbound(); // 记下这次主动消息时间，搭话会据此错开
@@ -993,7 +1013,7 @@ async function handleAngryTick(ctx) {
   try {
     await whale.api('/api/care/sent', {
       method: 'POST',
-      body: { chat: targetChat, text, group: false, id: angryDeliveryId || ('plugin-angry-' + Date.now()) },
+      body: { chat: targetChat, text, group: targetIsGroup, id: angryDeliveryId || ('plugin-angry-' + Date.now()) },
     });
   } catch { /* 记账失败不影响已发消息 */ }
 }
