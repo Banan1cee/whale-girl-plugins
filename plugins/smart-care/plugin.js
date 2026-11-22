@@ -270,8 +270,16 @@ const INTEREST_TTL = 5 * 60 * 1000;
 // ---- 被无视生气模块 ----
 const IGNORE_WINDOW_DEFAULT = 20;         // 默认判定窗口（分钟），可在设置里改
 const ANGRY_COOLDOWN_MS = 30 * 60 * 1000; // 生气后发送间隔（每30分钟最多一条）
-const ANGRY_START_DELAY_MS = 30 * 60 * 1000; // 被无视后要沉默这么久才开始生气（streak>=2 也要等）
-const ANGRY_LEVEL_UP_MS = 60 * 60 * 1000; // 每生气满1小时升一级
+const ANGRY_START_DELAY_DEFAULT = 30; // 被无视后要沉默多少分钟才开始生气（设置项 angryStartDelayMinutes）
+const ANGRY_LEVEL_UP_DEFAULT = 60;    // 每生气满多少分钟升一级（设置项 angryLevelUpMinutes）
+/** 生气触发延迟（毫秒），设置项 angryStartDelayMinutes，1~720 分钟 */
+function angryStartDelayMs(ctx) {
+  return Math.max(1, Math.min(720, numSetting(ctx, 'angryStartDelayMinutes', ANGRY_START_DELAY_DEFAULT, 1, 720))) * 60 * 1000;
+}
+/** 生气升级间隔（毫秒），设置项 angryLevelUpMinutes，5~720 分钟 */
+function angryLevelUpMs(ctx) {
+  return Math.max(5, Math.min(720, numSetting(ctx, 'angryLevelUpMinutes', ANGRY_LEVEL_UP_DEFAULT, 5, 720))) * 60 * 1000;
+}
 const ANGRY_MAX_LEVEL = 3;                // 最高三级：发一条心寒话后永久静默，只能道歉消气
 const OUTBOUND_GAP_DEFAULT = 10;          // 搭话与生气之间最小间隔（分钟），避免同一轮连发两条
 /** 读取判定窗口（分钟→毫秒），设置项 ignoreWindowMinutes，范围1~240 */
@@ -346,7 +354,7 @@ function checkPending(ctx) {
     //   level3(最高级) 只有道歉才消气；level1/2 对方回话即消气
     if (sender && sender === String(cur.targetWxid)) {
       replied = true;
-      const lvNow = angerLevelByTime(st.angrySince, now);
+      const lvNow = angerLevelByTime(st.angrySince, now, ctx);
       if (lvNow.level >= ANGRY_MAX_LEVEL && !isApology(ctx)) {
         // 最高级且没道歉 → 继续冷着，不清零
       } else {
@@ -385,15 +393,15 @@ function shouldGetAngry(ctx, strength) {
   if (!st.angrySince) {
     // 还没开始生气：要被无视满30分钟才启动（streak 够了也不急着发作）
     const lastAt = Number(st.lastIgnored && st.lastIgnored.at) || 0;
-    if (!lastAt || now - lastAt < ANGRY_START_DELAY_MS) return off;
+    if (!lastAt || now - lastAt < angryStartDelayMs(ctx)) return off;
     // 开始生气：记 angrySince；第一次直接发 level1
     writeAngryState(st, { angrySince: now, angrySentLevel: 1 });
-    return { should: true, level: angerLevelByTime(now, now), justStarted: true };
+    return { should: true, level: angerLevelByTime(now, now, ctx), justStarted: true };
   }
 
   // 生气中：按时间算等级；每个等级只发一次（升级到新等级才再发）
   // level3 也会发一条（心寒宣言），之后 angrySentLevel=3 → 永久静默，只能等道歉消气
-  const lv = angerLevelByTime(st.angrySince, now);
+  const lv = angerLevelByTime(st.angrySince, now, ctx);
   if (lv.level <= st.angrySentLevel) return { ...off, level: lv }; // 本级已发过，不重复
   return { should: true, level: lv, justStarted: false };
 }
@@ -408,19 +416,19 @@ function clearAnger(st) {
   writeAngryState(st || readAngryState(), { streak: 0, angrySince: 0, angrySentLevel: 0, lastAngryAt: 0, lastIgnored: null });
 }
 /** 愤怒分级：streak 越大越气（不报具体数字，避免「又2次没人理」那种蠢话） */
-/** 按「生气已持续多久」算等级：0-1h=1级有点不爽，1-2h=2级真火大，>=2h=3级心寒(发一条后静默,只能道歉消气) */
-function angerLevelByTime(since, now) {
+/** 按「生气已持续多久」算等级：每 angryLevelUpMinutes 升一级，最高3级(发一条后静默,只能道歉消气) */
+function angerLevelByTime(since, now, ctx) {
   if (!since) return { level: 0, label: '没事', desc: '正常语气' };
-  const hours = Math.max(0, (now - since) / ANGRY_LEVEL_UP_MS);
-  if (hours >= 2) return { level: 3, label: '心寒到懒得管', desc: '已经不是生气了，是心寒、爱答不理，语气冷下来，懒得多说；除非对方真心道歉，否则很难消气' };
-  if (hours >= 1) return { level: 2, label: '真火大', desc: '明显不爽、带火气，可以直说「白搭话了」「懒得理了」，但别骂脏话' };
+  const steps = Math.max(0, (now - since) / angryLevelUpMs(ctx));
+  if (steps >= 2) return { level: 3, label: '心寒到懒得管', desc: '已经不是生气了，是心寒、爱答不理，语气冷下来，懒得多说；除非对方真心道歉，否则很难消气' };
+  if (steps >= 1) return { level: 2, label: '真火大', desc: '明显不爽、带火气，可以直说「白搭话了」「懒得理了」，但别骂脏话' };
   return { level: 1, label: '有点不爽', desc: '轻微的嫌弃/无语，语气淡一点、带点刺，别太夸张' };
 }
 /** 当前生气状态：是否生气中 + 时间等级 */
-function currentAnger(now) {
+function currentAnger(now, ctx) {
   const st = readAngryState();
   const active = st.angrySince > 0;
-  return { active, since: st.angrySince, streak: st.streak, ...angerLevelByTime(st.angrySince, now || Date.now()) };
+  return { active, since: st.angrySince, streak: st.streak, ...angerLevelByTime(st.angrySince, now || Date.now(), ctx) };
 }
 /** 心寒档(streak>=6)的消气门槛：必须对方道歉才清零。检测常见道歉说法 */
 const APOLOGY_RE = /(对不起|抱歉|不好意思|sorry|我的锅|我的错|不该|不应该|原谅我|我错了|别生气|消消气|我道歉|赔罪)/i;
@@ -1008,7 +1016,7 @@ function panelStatus(ctx) {
       判定窗口分钟: numSetting(ctx, 'ignoreWindowMinutes', 20, 1, 240),
       搭话生气间隔分钟: numSetting(ctx, 'outboundGapMinutes', OUTBOUND_GAP_DEFAULT, 0, 240),
     },
-    当前火气: (() => { const c = currentAnger(Date.now()); return { 生气中: c.active, 等级: c.level + '/3 ' + c.label, 已生气时长: c.active ? Math.round((Date.now() - c.since) / 60000) + '分钟' : '-', 主动搭话: c.active ? '已停(生气中)' : '正常', 说明: c.level >= 3 ? '最高级：已发心寒话，之后不再主动发，需对方道歉才消气' : '' }; })(),
+    当前火气: (() => { const c = currentAnger(Date.now(), ctx); return { 生气中: c.active, 等级: c.level + '/3 ' + c.label, 已生气时长: c.active ? Math.round((Date.now() - c.since) / 60000) + '分钟' : '-', 主动搭话: c.active ? '已停(生气中)' : '正常', 说明: c.level >= 3 ? '最高级：已发心寒话，之后不再主动发，需对方道歉才消气' : '' }; })(),
     怎么控制: '在官方「主动与提醒」页开关：关→插件一起停；开→插件接管搭话。本页只查看状态。',
     注意: '软压会让官方页显示「今天已发满」；想让本体真发几条，把每天上限调大或清空 data/care-state.json。',
   };
@@ -1021,7 +1029,7 @@ exports.hooks = {
     try {
       if (!boolSetting(ctx, 'enabled', true) || !boolSetting(ctx, 'angryEnabled', true)) return {};
       checkPending(ctx); // 对方回话→按等级判定是否消气（最高级要道歉）
-      const cur = currentAnger(Date.now());
+      const cur = currentAnger(Date.now(), ctx);
       if (!cur.active || cur.level < 1) return {};
       const base = String((ctx && ctx.system) || '');
       return { system: base + ANGRY_PROMPT(cur) }; // 生气中，回复带当前时间等级的语气
