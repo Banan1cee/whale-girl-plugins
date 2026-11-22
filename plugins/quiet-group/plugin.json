@@ -1,0 +1,22 @@
+{
+  "Id": "quiet-group",
+  "Name": "群聊安静模式",
+  "Author": "WilliamsSum",
+  "Version": "1.0.0",
+  "MinAppVersion": "4.1.2",
+  "Description": "为指定微信群关闭普通消息的自动回复，保留明确 @ 或宿主识别的引用回复。留空时沿用宿主设置。插件仅使用消息标记和本地设置，无网络请求或发送操作。",
+  "ResultLabel": "群聊安静模式",
+  "Api": 4,
+  "Kind": "message",
+  "Hooks": ["chat.pre_reply"],
+  "Permissions": ["system.full"],
+  "Settings": [
+    {
+      "Key": "groups",
+      "Name": "启用安静模式的群 ID",
+      "Type": "string",
+      "Default": "",
+      "Description": "填写微信会话 ID，以逗号分隔。留空时所有会话沿用宿主规则。"
+    }
+  ]
+}
