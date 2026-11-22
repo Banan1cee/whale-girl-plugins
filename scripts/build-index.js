@@ -46,6 +46,14 @@ function catalogFor(manifest) {
 /** 扫描 plugins/ + packages/，返回 { 目录文件名: [条目...] } */
 function collect(root = ROOT) {
   const out = { [BY_API[1]]: [], [BY_API[2]]: [], [BY_API[3]]: [], [BY_API[4]]: [], [PERSONA]: [] };
+  const discussionsFile = path.join(root, 'discussion-issues.json');
+  const discussions = fs.existsSync(discussionsFile) ? readJson(discussionsFile) : {};
+  if (!discussions || Array.isArray(discussions) || typeof discussions !== 'object'
+      || Object.entries(discussions).some(([id, issue]) => !/^[a-z][a-z0-9-]{0,47}$/.test(id)
+        || !Number.isInteger(issue) || issue <= 0 || issue > 2147483647)
+      || new Set(Object.values(discussions)).size !== Object.keys(discussions).length) {
+    throw new Error('discussion-issues.json 需要为每个插件指定不同的正整数 Issue 编号');
+  }
   const pluginsDir = path.join(root, 'plugins');
   const packagesDir = path.join(root, 'packages');
   if (!fs.existsSync(pluginsDir)) return out;
@@ -73,6 +81,7 @@ function collect(root = ROOT) {
     }
     out[catalog].push({
       ...manifest,
+      ...(Object.hasOwn(discussions, manifest.Id) ? { DiscussionIssue: discussions[manifest.Id] } : {}),
       Download: PREFIX + zipName,
       Sha256: sha256(zipFile),
     });

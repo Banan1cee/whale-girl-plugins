@@ -17,6 +17,7 @@
       "chat.history",
       "model.prompt"
     ],
+    "DiscussionIssue": 35,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/context-notes-1.2.1.zip",
     "Sha256": "8a4f1354e4a7344e7dda1a8f28512077578385eeb1cb5beae889dd3848e323e7"
   },
@@ -35,6 +36,7 @@
       "chat.reply"
     ],
     "Permissions": [],
+    "DiscussionIssue": 39,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/followup-window-1.0.0.zip",
     "Sha256": "d6b0383649f69ace2c51e1d79078bd749534453fc5ddd06172342a6eabdb9a2f"
   }
