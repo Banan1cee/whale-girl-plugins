@@ -5,12 +5,13 @@
  *
  * 群友发「点歌 起风了」后：
  *   1. 落单（cover order），由 timer.tick 起 breeze-prep.mjs；
- *   2. breeze-prep 用在线音源下原曲、切 54 秒副歌，再调 seed-vc 换声；
- *   3. 成品出来后用 whale.sendVoice 发 [[cover:<单号>]]，鲸鲸语音桥把
+ *   2. breeze-prep 用在线音源下原曲、切一段副歌，再调 seed-vc 换声；
+ *   3. 成品出来后直接 spawn 运行时里的 send_cover.py，把本地音频发成语音（不依赖宿主补丁）；
  *      它换成 breezeblue 音色的翻唱音频，录成微信语音发回群里。
  */
 
 const { execFile, spawn } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -28,7 +29,7 @@ const SING_RE = /^(?:唱|唱一个|唱一首|来一段|发歌|发一下|听歌|�
 const ORDER_RE = new RegExp('^(?:' + PREFIXES.join('|') + ')[\\s:：,，]*(.*)$', 'i');
 
 // 微信 UIA 发送会把换行压成空格，菜单必须写成一行，用「；」分隔。
-const MENU_TEXT = '点歌：点歌 歌名；指定原唱：点歌 歌名 - 歌手；自动下载并做 54 秒 breezeblue 音色翻唱；看队列：点歌单；撤单：取消点歌 歌名';
+const MENU_TEXT = '点歌：点歌 歌名；指定原唱：点歌 歌名 - 歌手；自动下载并做一段 breezeblue 音色翻唱；看队列：点歌单；撤单：取消点歌 歌名';
 
 const recent = new Map(); // `${chatId}|${senderId}|${song}` -> ts，防微信重推导致重复落单
 
@@ -48,7 +49,7 @@ function runCover(settings, args, timeoutMs) {
       timeout: timeoutMs,
       windowsHide: true,
       maxBuffer: 4 * 1024 * 1024,
-      env: process.env,
+      env: { ...process.env, WHALE_COVER_DATA_DIR: dataRoot(settings) },
     }, (error, stdout, stderr) => {
       const text = String(stdout || '').trim();
       if (text) {
@@ -88,9 +89,9 @@ function voiceSignature() {
   } catch { return ''; }
 }
 
-function newestRefAfter(ts) {
+function newestRefAfter(settings, ts) {
   try {
-    const dir = path.join(dataRoot({}), 'voice-ref');
+    const dir = path.join(dataRoot(settings), 'voice-ref');
     const files = fs.readdirSync(dir)
       .filter((n) => /^ref-\d+\.(wav|mp3)$/i.test(n))
       .map((n) => ({ n, p: path.join(dir, n), m: fs.statSync(path.join(dir, n)).mtimeMs, s: fs.statSync(path.join(dir, n)).size }))
@@ -111,7 +112,7 @@ async function syncVoice(whale, settings, state, orders) {
     state.voiceWarned = false;
     saveAuto(state);
   }
-  const ref = newestRefAfter(Number(state.voiceChangedAt) - 120000);
+  const ref = newestRefAfter(settings, Number(state.voiceChangedAt) - 120000);
   if (!ref) {
     if (!state.voiceWarned) {
       state.voiceWarned = true;
@@ -147,7 +148,70 @@ function dataRoot(settings) {
   const custom = settings && settings.dataDir ? String(settings.dataDir) : '';
   if (custom) return custom;
   if (process.env.WHALE_COVER_DATA_DIR) return process.env.WHALE_COVER_DATA_DIR;
-  return path.join(os.homedir(), '.dsh', 'whale-cover');
+  return path.join(runtimeRoot(settings), 'data');
+}
+
+function runtimeRoot(settings) {
+  return path.dirname(path.dirname(cliPath(settings)));
+}
+
+function voiceTarget(id, name, chatType) {
+  const title = String(name || '').trim();
+  if (!id || id === 'anonymous' || id === 'default' || !title || title === id || title === '-' || title === '群友'
+    || /^(?:wxid_|gh_)/i.test(title) || /@chatroom$/i.test(title)
+    || !['private', 'group'].includes(chatType)) return null;
+  return { id, name: title, chatType };
+}
+
+function deliveryFile(settings, orderId, target, requestId = '') {
+  const key = crypto.createHash('sha256')
+    .update(JSON.stringify([orderId, target.chatType, target.id, requestId])).digest('hex');
+  return path.join(dataRoot(settings), 'voice-delivery', key + '.json');
+}
+
+function deliveryStatus(file) {
+  try {
+    const stat = fs.statSync(file);
+    const status = JSON.parse(fs.readFileSync(file, 'utf8')).status;
+    if (status === 'pending') return Date.now() - stat.mtimeMs < 120000 ? 'pending' : 'uncertain';
+    return ['sent', 'failed', 'uncertain'].includes(status) ? status : 'uncertain';
+  } catch (error) {
+    return error.code === 'ENOENT' ? 'new' : 'uncertain';
+  }
+}
+
+// 录音可以超过 hook 的预算。先独占占位，再由独立发送器写入结果。
+function sendCoverFile(settings, target, wav, file, request = '') {
+  const root = runtimeRoot(settings);
+  const py = settings.voicePython || path.join(root, 'voice', 'venv', 'Scripts', 'python.exe');
+  const script = settings.voiceSender || path.join(root, 'voice', 'send_cover.py');
+  if (!fs.existsSync(py) || !fs.existsSync(script)) return 'failed';
+  const wavPath = path.resolve(dataRoot(settings), String(wav || ''));
+  if (!wav || !fs.statSync(wavPath, { throwIfNoEntry: false })?.isFile()) return 'failed';
+
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  try {
+    fs.writeFileSync(file, JSON.stringify({ status: 'pending', request }), { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if (error.code === 'EEXIST') return deliveryStatus(file);
+    throw error;
+  }
+  const failStart = () => {
+    try { fs.writeFileSync(file, JSON.stringify({ status: 'failed', request })); }
+    catch { /* 保留占位，超时后按不确定处理 */ }
+  };
+  try {
+    const child = spawn(py, [script, '--wav', wavPath, '--chat', target.name,
+      '--chat-type', target.chatType, '--result-file', file], {
+      detached: true, windowsHide: true, stdio: 'ignore',
+    });
+    child.once('error', failStart);
+    child.unref();
+    return 'pending';
+  } catch {
+    failStart();
+    return 'failed';
+  }
 }
 
 function prepScriptPath(settings) {
@@ -216,13 +280,18 @@ function saveAuto(state) {
   const failedCutoff = Date.now() - 24 * 3600 * 1000;
   for (const [id, at] of Object.entries(failed)) if (!(Number(at) > failedCutoff)) delete failed[id];
   state.failedAt = failed;
+  const stopped = state.voiceStopped || {};
+  for (const [id, at] of Object.entries(stopped)) if (!(Number(at) > cutoff)) delete stopped[id];
+  state.voiceStopped = stopped;
   try { fs.writeFileSync(AUTO_STATE, JSON.stringify(state)); } catch { /* data 目录不可写就只跑内存态 */ }
 }
 
 function groupTarget(order) {
   const id = String(order.group && order.group.id || '');
   if (!id) return null;
-  return { id, name: String(order.group.name || id), chatType: 'group' };
+  const chatType = order.chatType === 'private' || !/@chatroom$/i.test(id) && order.wxid === id
+    ? 'private' : 'group';
+  return { id, name: String(order.group.name || id), chatType };
 }
 
 // 群里点歌时 chatTitle 偶尔为空，导致 order.group.name 空、语音发不出去。
@@ -251,7 +320,7 @@ function isOurs(order) {
 async function notifyGroup(whale, order, text) {
   const target = groupTarget(order);
   if (!whale || !target) return;
-  try { await whale.sendText(target.id, text, { name: target.name, chatType: 'group' }); } catch { /* 桥没起就算了 */ }
+  try { await whale.sendText(target.id, text, { name: target.name, chatType: target.chatType }); } catch { /* 桥没起就算了 */ }
 }
 
 const SONG_EXTS = new Set(['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.opus', '.wma']);
@@ -316,7 +385,7 @@ function startRender(settings, order, source) {
 function startPrep(settings, order) {
   const prep = prepScriptPath(settings);
   if (!fs.existsSync(prep)) throw new Error('缺少 breeze-prep.mjs：' + prep);
-  const python = settings.python || path.join(os.homedir(), '.dsh', 'whale-cover', 'engine', 'venv', 'Scripts', 'python.exe');
+  const python = settings.python || path.join(runtimeRoot(settings), 'engine', 'venv', 'Scripts', 'python.exe');
   const repo = path.dirname(path.dirname(cliPath(settings)));
   const repoFfmpeg = path.join(repo, 'tools', 'ffmpeg');
   const ffmpegDir = settings.ffmpeg || (fs.existsSync(path.join(repoFfmpeg, 'ffmpeg.exe')) ? repoFfmpeg : path.join(path.dirname(repo), 'tools', 'ffmpeg'));
@@ -334,7 +403,7 @@ function startPrep(settings, order) {
       BREEZE_ENGINE: settings.engine || 'seedvc',
       BREEZE_FFMPEG_DIR: ffmpegDir,
       BREEZE_CACHE: path.join(repo, '.tmp', 'breeze-cache'),
-      BREEZE_SECONDS: String(settings.maxSeconds || 54),
+      BREEZE_SECONDS: String(settings.maxSeconds || 30),
       BREEZE_LOG: PREP_LOG,
     },
   });
@@ -343,28 +412,20 @@ function startPrep(settings, order) {
   return child.pid || 0;
 }
 
-async function deliverReady(whale, settings, order, state) {
-  const target = groupTarget(order);
-  if (!whale || !target) return false;
-  if (state.sent && state.sent[order.id]) return true;
+async function deliverReady(settings, order, state) {
+  const chat = groupTarget(order);
+  const target = chat && voiceTarget(chat.id, chat.name, chat.chatType);
+  if (!target) return 'failed';
+  if (state.sent?.[order.id]) return 'already-sent';
 
-  const ensured = await runCover(settings, ['voice', 'ensure'], 10000);
-  if (!ensured || !ensured.ok) return false;
+  const file = deliveryFile(settings, order.id, target);
+  const status = deliveryStatus(file);
+  if (status !== 'new') return status;
 
-  try {
-    const sent = await whale.sendVoice(target.id, `[[cover:${order.id}]]`, {
-      name: target.name,
-      chatType: 'group',
-    });
-    if (!sent || !sent.id) return false;
-  } catch { return false; }
-
-  state.sent = state.sent || {};
-  state.sent[order.id] = Date.now();
-  try {
-    await whale.sendText(target.id, `做好了～《${order.song}》`, { name: target.name, chatType: 'group' });
-  } catch { /* 语音已经排上，短句发不出去不重试 */ }
-  return true;
+  const ensured = await runCover(settings, ['voice', 'ensure'], 5000);
+  if (!ensured?.ok) return 'failed';
+  try { return sendCoverFile(settings, target, order.audio, file); }
+  catch { return 'failed'; }
 }
 
 async function autoTick(whale, settings) {
@@ -392,7 +453,7 @@ async function autoTick(whale, settings) {
 
   // 内核/插件重启后 state.active 可能丢了；已经 ready 但没发过的单要补发。
   if (!active) {
-    const unsent = ours.find((o) => o.status === 'ready' && !(state.sent && state.sent[o.id]));
+    const unsent = ours.find((o) => o.status === 'ready' && !state.sent?.[o.id] && !state.voiceStopped?.[o.id]);
     if (unsent) {
       state.active = { id: unsent.id, startedAt: Date.now(), recovered: true };
       saveAuto(state);
@@ -401,28 +462,30 @@ async function autoTick(whale, settings) {
   }
 
   if (active && active.status === 'ready') {
-    const ok = await deliverReady(whale, settings, active, state);
-    if (ok) {
-      state.active = null;
-      state.attempts = {};
-      state.progressStartedAt = null;
-      state.lastProgressAt = null;
-      saveAuto(state);
-      return;
-    }
-    state.attempts = state.attempts || {};
-    const n = (Number(state.attempts[active.id]) || 0) + 1;
-    if (n >= 3) {
-      state.active = null;
-      delete state.attempts[active.id];
-      saveAuto(state);
-      await notifyGroup(whale, active, `《${active.song}》做好了，但语音没发出去；回「唱 ${active.song}」我再试。`);
+    const delivery = await deliverReady(settings, active, state);
+    if (delivery === 'pending') return;
+
+    state.active = null;
+    state.attempts = {};
+    state.progressStartedAt = null;
+    state.lastProgressAt = null;
+    if (delivery === 'sent' || delivery === 'already-sent') {
+      state.sent = state.sent || {};
+      state.sent[active.id] = Date.now();
     } else {
-      state.attempts[active.id] = n;
-      saveAuto(state);
+      state.voiceStopped = state.voiceStopped || {};
+      state.voiceStopped[active.id] = Date.now();
+    }
+    saveAuto(state);
+    if (delivery === 'sent') {
+      await notifyGroup(whale, active, `唱好了～《${active.song}》`);
+    } else if (delivery !== 'already-sent') {
+      const hint = delivery === 'uncertain' ? '没能确认语音是否送达' : '语音没发出去';
+      await notifyGroup(whale, active, `《${active.song}》已生成，${hint}。确认会话里没有语音后，可回「唱 ${active.song}」。`);
     }
     return;
   }
+
   if (active && active.status === 'failed') {
     const reason = failureReason(settings, active);
     state.active = null;
@@ -529,7 +592,7 @@ async function autoTick(whale, settings) {
       state.progressStartedAt = Date.now();
       state.lastProgressAt = Date.now();
       saveAuto(state);
-      await notifyGroup(whale, next, `收到《${next.song}》，正在下载原曲、切 ${Number(settings.maxSeconds) || 60} 秒副歌～`);
+      await notifyGroup(whale, next, `收到《${next.song}》，正在下载原曲、切 ${Number(settings.maxSeconds) || 30} 秒副歌～`);
     } catch (error) {
       state.failedAt = state.failedAt || {};
       state.failedAt[next.id] = Date.now();
@@ -593,7 +656,7 @@ function parseOrder(text) {
 function nameFor(message) {
   const isGroup = message.chatType === 'group';
   if (isGroup) return message.chatTitle || message.chatId;
-  return message.senderName || message.senderId || message.chatId;
+  return message.chatTitle || message.senderName || message.senderId || message.chatId;
 }
 
 function chatFor(message) {
@@ -628,11 +691,13 @@ async function handleOrder(whale, message, settings, parsed) {
     'order',
     '--song', parsed.song,
     '--requester', me,
-    '--via', 'group',
+    '--via', message.chatType === 'group' ? 'group' : 'private',
+    '--chat-type', message.chatType === 'group' ? 'group' : 'private',
     '--engine', settings.engine || 'seedvc',
-    '--group-id', String(message.chatId || ''),
+    '--group-id', chatFor(message),
   ];
-  if (message.chatTitle) args.push('--group-name', String(message.chatTitle));
+  const title = message.chatType === 'group' ? message.chatTitle : (message.chatTitle || message.senderName);
+  if (title) args.push('--group-name', String(title));
   if (parsed.artist) args.push('--artist', parsed.artist);
   if (parsed.note) args.push('--note', parsed.note);
   if (message.senderId) args.push('--wxid', String(message.senderId));
@@ -768,13 +833,7 @@ async function handleCancel(whale, message, settings, wanted) {
   await reply(whale, message, res && res.ok ? `好，撤掉《${target.song}》。` : '撤单失败，晚点再说。');
 }
 
-/**
- * 「唱 起风了」：把已经做好的成品，通过鲸鲸的语音链路唱出来。
- *
- * 做法不是发文件（插件也没有发文件的能力），而是让鲸鲸照常「发语音」：
- * 语音里那句文本实际是 [[cover:<单号>]]，本机语音桥把它换成成品音频，
- * 播放进虚拟声卡 → 微信录成语音。见 whale-plugin/voice-bridge.mjs。
- */
+// 「唱 歌名」只播放现成的成品。录音结果由本地发送器确认。
 async function handleSing(whale, message, settings, wanted) {
   const out = await runCover(settings, ['list', '--limit', '100'], 15000);
   if (!out || !out.ok) {
@@ -783,7 +842,7 @@ async function handleSing(whale, message, settings, wanted) {
   }
   const ready = (out.orders || []).filter((o) => ['ready', 'delivered'].includes(o.status)
     && (o.hasAudio || o.durationSec)
-    && (!o.group || !o.group.id || String(o.group.id) === String(message.chatId)));
+    && (!o.group?.id || String(o.group.id) === String(chatFor(message))));
   const want = String(wanted || '').trim();
   const target = want
     ? ready.find((o) => o.id === want) || ready.find((o) => o.song === want) || ready.find((o) => o.song.includes(want))
@@ -795,25 +854,46 @@ async function handleSing(whale, message, settings, wanted) {
     return;
   }
 
-  const ensured = await runCover(settings, ['voice', 'ensure'], 25000);
-  if (!ensured || !ensured.ok) {
-    await reply(whale, message, '语音通道没起来，先把鲸鲸的微信桥打开。');
+  const type = message.chatType === 'group' ? 'group' : 'private';
+  const title = type === 'group' ? message.chatTitle : (message.chatTitle || message.senderName);
+  const chat = voiceTarget(chatFor(message), title, type);
+  if (!chat) {
+    await reply(whale, message, '我没能确认微信会话标题，先不发。');
+    return;
+  }
+  const ensured = await runCover(settings, ['voice', 'ensure'], 5000);
+  if (!ensured?.ok) {
+    await reply(whale, message, '语音通道或账号核验未就绪。');
     return;
   }
 
   try {
-    const isGroup = message.chatType === 'group';
-    const sent = await whale.sendVoice(chatFor(message), `[[cover:${target.id}]]`, {
-      name: nameFor(message),
-      chatType: isGroup ? 'group' : 'private',
-    });
-    if (!sent || !sent.id) throw new Error('没有排上');
+    const autoFile = deliveryFile(settings, target.id, chat);
+    const autoStatus = deliveryStatus(autoFile);
+    const orderChat = groupTarget(target);
+    const canUseAuto = orderChat?.id === chat.id && orderChat.chatType === chat.chatType
+      && target.status === 'ready';
+    const messageKey = String(message.msgId || Math.floor(Date.now() / 120000));
+    const manualFile = deliveryFile(settings, target.id, chat, messageKey);
+    const request = path.basename(manualFile);
+    let priorRequest = '';
+    if (autoStatus !== 'new') {
+      try { priorRequest = JSON.parse(fs.readFileSync(autoFile, 'utf8')).request; } catch { /* 当前回执不完整 */ }
+    }
+    const useAuto = priorRequest === request || (canUseAuto && ['new', 'pending'].includes(autoStatus));
+    const file = useAuto ? autoFile : manualFile;
+    const status = deliveryStatus(file);
+    const delivery = status === 'new' ? sendCoverFile(settings, chat, target.audio, file, request) : status;
+    if (delivery === 'pending') {
+      await reply(whale, message, `正在尝试发送《${target.song}》，请以微信语音条为准。`);
+    } else if (delivery === 'failed') {
+      await reply(whale, message, '语音没发出去，检查微信前台和语音设备后再试。');
+    } else if (delivery === 'uncertain') {
+      await reply(whale, message, '上次发送结果不确定，请先核对聊天里的语音条。');
+    }
   } catch {
-    await reply(whale, message, '这段没发出去，等会儿再试。');
-    return;
+    await reply(whale, message, '没能启动语音发送器。');
   }
-  // 语音要录几十秒，先回一句短的，免得群里以为没反应
-  await reply(whale, message, `来了～《${target.song}》`);
 }
 
 module.exports = {
@@ -823,9 +903,9 @@ module.exports = {
       const whale = input.whale;
       const message = input.message || {};
       const settings = input.settings || {};
-      if (!whale || !message.text) return { action: 'pass' };
-      if (settings.onlyGroup !== false && message.chatType !== 'group') {
-        // 私聊默认不接管点歌，但「唱 歌名」要能用：语音翻唱在私聊里最方便验货
+      if (!whale || !message.text || (message.platform && message.platform !== 'wechat')) return { action: 'pass' };
+      if (settings.onlyGroup === true && message.chatType !== 'group') {
+        // 群聊限定时保留私聊播放已经生成的成品。
         const privateSing = SING_RE.exec(cleanText(message.text));
         if (!privateSing) return { action: 'pass' };
         await handleSing(whale, message, settings, privateSing[1].trim());

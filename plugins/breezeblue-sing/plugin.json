@@ -1,20 +1,20 @@
 {
-    "Id":  "breezeblue-sing",
-    "Name":  "Breezeblue 翻唱（本地发送器版）",
-    "Author":  "RacOrange",
-    "Version":  "1.0.0",
-    "MinAppVersion":  "4.1.2",
-    "Description":  "点歌后自动找音源、切 30 秒副歌，用 breezeblue 音色经本机 seed-vc 翻唱，并通过本地发送器直接发成微信语音。支持群聊/私聊点歌、唱、唱给主人1/主人2、闲时主动唱歌与网易云 cookies 路径；不依赖鲸鲸宿主补丁、不修改主程序。运行时由配套安装器部署，不随市场 ZIP 分发。",
-    "ResultLabel":  "翻唱语音",
-    "Api":  4,
-    "Kind":  "message",
-    "Hooks":  [
-                  "chat.pre_reply",
-                  "timer.tick"
-              ],
-    "Permissions":  [
-                        "system.full"
-                    ],
-    "ExecutionTimeoutMs":  20000,
-    "IntervalSeconds":  10
+  "Id": "breezeblue-sing",
+  "Name": "Breezeblue 翻唱（本地发送器版）",
+  "Author": "RacOrange",
+  "Version": "1.0.1",
+  "MinAppVersion": "4.1.2",
+  "Description": "群聊和私聊点歌、查看或取消订单、播放已有翻唱成品。本机 seed-vc 生成副歌，通过独立发送器发送微信语音。需要配套 Windows 运行时，支持网易云 cookies 路径。",
+  "ResultLabel": "翻唱语音",
+  "Api": 4,
+  "Kind": "message",
+  "Hooks": [
+    "chat.pre_reply",
+    "timer.tick"
+  ],
+  "Permissions": [
+    "system.full"
+  ],
+  "ExecutionTimeoutMs": 20000,
+  "IntervalSeconds": 10
 }
