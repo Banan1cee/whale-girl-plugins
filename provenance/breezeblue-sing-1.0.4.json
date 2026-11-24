@@ -1,0 +1,11 @@
+{
+  "publisher": {
+    "login": "RacOrange",
+    "id": 131949177
+  },
+  "source": {
+    "repository": "RacOrange/whale-girl-plugins",
+    "commit": "c79b7b26b49c27d0445e542fc725b1ee62e5cd48",
+    "path": "plugins/breezeblue-sing"
+  }
+}
