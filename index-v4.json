@@ -23,6 +23,28 @@
     "Sha256": "55a23fad1c1fd35a51c3305526910b5090ab920263c6d44577409a6e6815e442"
   },
   {
+    "Id": "breezeblue-sing",
+    "Name": "Breezeblue 翻唱（本地发送器版）",
+    "Author": "RacOrange",
+    "Version": "1.0.0",
+    "MinAppVersion": "4.1.2",
+    "Description": "点歌后自动找音源、切 30 秒副歌，用 breezeblue 音色经本机 seed-vc 翻唱，并通过本地发送器直接发成微信语音。支持群聊/私聊点歌、唱、唱给主人1/主人2、闲时主动唱歌与网易云 cookies 路径；不依赖鲸鲸宿主补丁、不修改主程序。运行时由配套安装器部署，不随市场 ZIP 分发。",
+    "ResultLabel": "翻唱语音",
+    "Api": 4,
+    "Kind": "message",
+    "Hooks": [
+      "chat.pre_reply",
+      "timer.tick"
+    ],
+    "Permissions": [
+      "system.full"
+    ],
+    "ExecutionTimeoutMs": 20000,
+    "IntervalSeconds": 10,
+    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/breezeblue-sing-1.0.0.zip",
+    "Sha256": "32f1911961c9921d5f92c36eea4e76b04f78f2dcee7bd105cd37d8c0276dd6d8"
+  },
+  {
     "Id": "care-plus",
     "Name": "主动搭话增强",
     "Author": "kelin",
