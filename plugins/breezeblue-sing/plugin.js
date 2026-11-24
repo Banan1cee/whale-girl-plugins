@@ -585,6 +585,11 @@ function proactivelyAllowed(settings, state, now) {
   return count < max && (!state.lastAt || now - state.lastAt >= cooldown);
 }
 
+function contactsMatchBridge(contacts, bridge) {
+  return Boolean(bridge && Array.isArray(contacts?.items) && contacts.account
+    && (contacts.account === bridge.accountWxid || contacts.account === bridge.account));
+}
+
 async function proactiveContext(whale, settings, now) {
   if (process.permission?.has('ChildProcess') === false) return null;
   const status = (await whale.api('/api/status'))?.body;
@@ -598,8 +603,7 @@ async function proactiveContext(whale, settings, now) {
   if (!Array.isArray(plugins) || plugins.some(item => item.id === 'breeze-proactive')) return null;
   const master = (await whale.api('/api/config'))?.body?.config?.persona?.master;
   const contacts = (await whale.api('/api/wechat/contacts'))?.body;
-  if (!Array.isArray(master?.wxids) || !Array.isArray(contacts?.items)
-    || contacts.account !== bridge.account) return null;
+  if (!Array.isArray(master?.wxids) || !contactsMatchBridge(contacts, bridge)) return null;
   const configured = Array.isArray(settings.proactiveRecipientIds)
     ? new Set(settings.proactiveRecipientIds.map(String)) : null;
   const privateIds = settings.proactivePrivateEnabled === false ? [] : master.wxids.map(String)
@@ -1321,7 +1325,7 @@ async function relayContext(whale, settings, owner, word, prior) {
   const allowed = new Set(Array.isArray(settings.relaySingWhitelist) ? settings.relaySingWhitelist.map(String) : []);
   if (!allowed.size) return null;
   const contacts = (await whale.api('/api/wechat/contacts'))?.body;
-  if (!Array.isArray(contacts?.items) || contacts.account !== bridge.account) return null;
+  if (!contactsMatchBridge(contacts, bridge)) return null;
 
   const labels = contact => [contact.name, contact.remark, contact.label].map(relayName).filter(Boolean);
   const roles = item => Object.entries(master.titles || {})
