@@ -301,22 +301,25 @@
     "Id": "xmding",
     "Name": "小咪叮",
     "Author": "atroy",
-    "Version": "1.0.6",
+    "Version": "1.1.1",
     "MinAppVersion": "4.1.2",
     "appEpoch": 1,
-    "Description": "按群名 / 人名 / 备注 / wxid 或会话 ID，向指定群聊或个人主动发消息，支持文字、语音与图片，支持 dryRun 预检和投递回执查询。",
+    "Description": "按群名 / 人名 / 备注 / wxid 或会话 ID，向指定群聊或个人主动发消息，支持文字、语音与图片，支持 dryRun 预检和投递回执查询；v1.1.1 起内置独立监听转发，可绕过宿主插件接口的仅本机限制。",
     "ResultLabel": "发送结果",
     "Api": 4,
     "Kind": "tool",
     "Hooks": [
-      "tool.run"
+      "tool.run",
+      "app.start",
+      "app.stop",
+      "timer.tick"
     ],
     "Permissions": [
       "system.full"
     ],
     "ExecutionTimeoutMs": 45000,
     "DiscussionIssue": 47,
-    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/xmding-1.0.6.zip",
-    "Sha256": "022ce3164114579bb518b796e1d2a5ebb946e691f8f187395070f40201dff4e6"
+    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/xmding-1.1.1.zip",
+    "Sha256": "5387b5af4ddf3842e0788b71633f19b4e7771d423ea071270298d72829ded7fd"
   }
 ]
