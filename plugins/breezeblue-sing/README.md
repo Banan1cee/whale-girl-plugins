@@ -1,86 +1,65 @@
-# Breezeblue 翻唱（本地发送器版，breezeblue-sing）
+# Breezeblue 翻唱 1.0.4
 
-点歌插件：群聊/私聊点歌后自动找音源、切 30 秒副歌，用 breezeblue 音色经本机 seed-vc 翻唱，并通过**本地发送器直接发成微信语音**。
+鲸鲸 Api 4 消息插件。群聊和私聊可点歌、看歌单、撤单和播放当前会话的已有成品。本机 seed-vc 制作整首翻唱，通过 VB-CABLE 和微信前台录成语音。
 
-这是独立实现的新插件 ID（`breezeblue-sing`），不改动市场上的旧 `breeze-sing`；运行时由配套安装器部署，**不修改鲸鲸主程序、不需要宿主语音补丁**。
+## 安装与升级
 
-## 重要：不是纯 JS 单文件插件
+需要 Windows x64、微信 PC 4.2、鲸鲸 Api 4，原版 4.1.8.2 为实测目标及 NVIDIA GPU。安装 [Windows 运行时 1.0.17 或更新版本](https://github.com/RacOrange/breezeblue-sing-installer/releases/latest)。已有运行时可用安装器的插件步骤覆盖，保留设置与模型。RTX 50 系列若出现 CUDA 算子错误，运行新版安装器重新检查依赖。更新后在市场重新确认完整权限；两个同类唱歌插件只启用一个。
 
-本插件是 Api 4 完整权限插件，但只靠 ZIP 不能独立跑起来：
+## 设置
 
-- Windows 10/11 x64 + NVIDIA GPU（建议 ≥6GB 显存）
-- 微信 PC 4.2
-- 鲸鲸 4.1.2+
-- 磁盘 ≥10GB
-- 配套安装器负责：Python/torch/seed-vc/模型/ffmpeg、语音发送 venv、VB-CABLE、参考音、插件写入
+空设置从用户目录下的 whale-cover 推导路径。非默认安装目录可使用安装器写入的绝对路径。
 
-## 安装
-
-1. 先运行安装器（运行时 + 发送器 + VB-CABLE + 参考音 + 插件写入）；
-2. 打开鲸鲸「插件市场 → 已安装 → Breezeblue 翻唱（本地发送器版）→ 设置」确认路径；
-3. 重启鲸鲸内核，私聊发 `点歌 起风了` 做冒烟测试。
-
-设置示例：
-
-```json
+~~~json
 {
-  "coverCli": "%USERPROFILE%\\whale-cover\\tools\\cover.mjs",
-  "python": "%USERPROFILE%\\whale-cover\\engine\\venv\\Scripts\\python.exe",
-  "ffmpeg": "%USERPROFILE%\\whale-cover\\tools\\ffmpeg",
-  "dataDir": "%USERPROFILE%\\whale-cover\\data",
-  "voicePython": "%USERPROFILE%\\whale-cover\\voice\\venv\\Scripts\\python.exe",
-  "voiceSender": "%USERPROFILE%\\whale-cover\\voice\\send_cover.py",
+  "coverCli": "D:\\whale-cover\\tools\\cover.mjs",
+  "python": "D:\\whale-cover\\engine\\venv\\Scripts\\python.exe",
+  "ffmpeg": "D:\\whale-cover\\tools\\ffmpeg",
+  "dataDir": "D:\\whale-cover\\data",
+  "voicePython": "D:\\whale-cover\\voice\\venv\\Scripts\\python.exe",
+  "voiceSender": "D:\\whale-cover\\voice\\send_cover.py",
   "engine": "seedvc",
-  "maxSeconds": 30,
   "onlyGroup": false,
-  "neteaseCookies": "%USERPROFILE%\\whale-cover\\cookies.txt",
-  "proactiveEnabled": true,
-  "proactiveIdleMinutes": 120,
-  "proactiveDailyMax": 2,
-  "proactiveQuietStart": "22:30",
-  "proactiveQuietEnd": "09:00",
-  "proactiveCooldownMinutes": 360,
-  "allowDownload": true,
-  "downloadCandidates": ["晴天", "后来", "小幸运"]
+  "autoRender": true
 }
-```
+~~~
 
-- `neteaseCookies` 只填 **cookie 文件路径**，插件不保存、不打包账号数据。
-- 单主人/双主人都支持：双主人显示「主人1/主人2」，单主人显示「主人」。
-- 主动唱歌默认开启；`proactiveEnabled: false` 关闭。
+| 字段 | 用途与默认 |
+| --- | --- |
+| coverCli、python、ffmpeg、dataDir | CLI、渲染 Python、FFmpeg 与运行数据的路径字符串，默认由运行时根目录推导。 |
+| voicePython、voiceSender | 语音 Python 与发送脚本的路径字符串，默认由 CLI 根目录推导。 |
+| engine | 引擎字符串，默认 seedvc。 |
+| neteaseCookies | 可选的本地 Cookie 文件路径字符串，默认运行时根目录下 cookies.txt。设置只填路径。 |
+| onlyGroup | 默认 false，私聊和群聊接收点歌。true 时私聊仅可播放已有成品。 |
+| autoRender | 默认 true，false 暂停定时渲染和自动投递。 |
 
-## 命令
+## 命令和发送
 
-- `点歌 起风了` / `点歌 起风了 - 买辣椒也用券`
-- 私聊点歌先回 `是《起风了》对吧，我先找原曲～`；群聊回排队位次
-- `点歌单`、`取消点歌 起风了`
-- `唱 安荣`
-- `把《安荣》唱给主人2听`（单主人用「主人」）
-- 唱完约 12 秒补一句“我唱了《歌名》，你觉得好听吗？”
-- 闲时主动唱歌：文字 → 语音 → 追问
+- 点歌 歌名，或点歌 歌名 - 歌手。
+- 点歌单、取消点歌 歌名、唱 歌名。
+- 发送时保持微信在前台，目标会话在最近列表可见，绑定账号与 UIA 核验通过，微信录音输入为 CABLE Output。
+- 标题缺失、出现同名候选或账号核验失败时停止。请以本次新增、时长匹配的语音条为准。
+- 如提示送达不确定，先核对微信，确认没有语音后再手动播放。定时器不会自动重发该订单。
 
-## 测试用例
+1.0.1 使用独立发送器及本地结果回执。
 
-| 组 | 输入 | 预期 |
-| --- | --- | --- |
-| 1 点歌 | 群里发 `点歌 起风了` | 回排队位次；完成后 30 秒语音，无“收到/进度/做好了”过程话术 |
-| 2 私聊点歌 | 私聊发 `点歌 起风了` | 立即回 `是《起风了》对吧，我先找原曲～`；完成后语音 + 追问 |
-| 3 唱成品 | 私聊发 `唱 安荣` | 只发语音；约 12 秒后补“主人1，我唱了《安荣》，你觉得好听吗？” |
-| 4 唱给主人 | 私聊发 `把《安荣》唱给主人2听` | 给主人2发“主人1让我把这首《安荣》唱给你听～”+ 语音 + 追问；回执 |
-| 5 容错 | 私聊发 `唱 不存在的歌` | 回“《不存在的歌》还没唱好，等做好了再喊我。” |
+## 整首播放、主动唱歌与代发
 
-第 1–4 组需要运行时、VB-CABLE、微信前台；仅验证安装/设置时测第 5 组。
+普通点歌渲染完整成品，在人声停顿附近按最多约 56 秒分段，每次确认一条后继续。已有 30 秒成品可播放；如要整首，需要重新点歌。首次参考音默认进入方案 B，由用户确认后复用鲸鲸现有语音，无 Windows TTS 回退。
 
-## 已知限制
+闲时主动唱歌默认关闭。启用后可给已绑定主人私聊唱，也可给明确配置的群唱。每次选择本地未唱曲目，优先沿用旧历史做去重，送出一段并核验回执后才继续下一段。旧独立主动插件仍出现在宿主插件清单时暂停新调度。
 
-- 成品是副歌片段，不是完整歌曲；音源可能只有翻唱/Live 版。
-- 语音发送依赖微信 UIA 与前台窗口；被遮挡或窗口切走会失败并提示，不会发到错误会话。
-- 渲染约 8–14 分钟（6GB 显卡建议 ≤30 秒），由独立子进程完成，插件 timer 只轮询状态。
-- 换机器需迁移运行时数据（`dataDir` 下 orders/work）。
-- 微信升级可能破坏 UIA；当前只保证 4.2。
+| 字段 | 用途与默认 |
+| --- | --- |
+| proactiveEnabled | 布尔值，默认 false，启用闲时主动唱歌。 |
+| proactivePrivateEnabled、proactiveRecipientIds | 私聊默认启用。可设为 false 只唱白名单群。可把绑定主人会话 ID 填入数组进一步限定私聊。 |
+| proactiveGroupIds | 群会话 ID 字符串数组，默认空。只选择其中能唯一核验的群。 |
+| proactiveIdleMinutes、proactiveCooldownMinutes、proactiveDailyMax | 空闲默认 120 分钟，最少 5 分钟。冷却默认 360 分钟，最少 30 分钟。每日次数默认 2，上限 5。 |
+| proactiveQuietStart、proactiveQuietEnd | 本地时间 HH:mm，默认 22:30 到 09:00。 |
+| proactiveFollowup、proactiveDryRun | 布尔值，默认 false。分别控制唱完后的文字、只演练且不发语音。 |
+| proactiveAllowDownload、proactiveDownloadCandidates | 默认关闭下载。开启后候选语句数组适用于没有未唱本地曲目的场景。 |
 
-## 1.0.0
+代发默认关闭。设置 relaySingEnabled 为 true，relaySingWhitelist 填准确目标会话 ID 的数组。有宿主代发白名单时也必须在其范围内。已绑定主人在自己的私聊发送「去『目标群』唱《歌曲》」或「把《歌曲》唱给爸爸听」。收到预览后，同一主人在同一私聊内用「唱歌确认 六位码」二次确认，十分钟有效。每条发送前重新核验目标和名单。接收端语音条方向和时长有疑问时暂停后续语音。
 
-- 新插件 ID `breezeblue-sing`，与旧 `breeze-sing` 并存。
-- 本地发送器直连，不需要鲸鲸宿主补丁。
-- 支持群聊/私聊点歌、`唱`、`唱给主人`、闲时主动唱歌、网易云 cookies 路径、30 秒成品。
+1.0.4 与配套安装器 1.0.17 需联合验证。支持配置与安全说明见安装器使用文档。
+安装器会实际执行 CUDA 算子检查兼容性，RTX 50 系列安装 cu128。渲染失败时，发送到会话的消息只含错误分类，详细日志保存在本机工作目录。
