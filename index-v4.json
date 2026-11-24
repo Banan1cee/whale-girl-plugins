@@ -115,6 +115,34 @@
     "Sha256": "dbd25f69795d348515e9a632da653f7b6f1522840ed1461c2b8c32329b6e8888"
   },
   {
+    "Id": "quiet-group",
+    "Name": "群聊安静模式",
+    "Author": "WilliamsSum",
+    "Version": "1.0.0",
+    "MinAppVersion": "4.1.2",
+    "Description": "为指定微信群关闭普通消息的自动回复，保留明确 @ 或宿主识别的引用回复。留空时沿用宿主设置。插件仅使用消息标记和本地设置，无网络请求或发送操作。",
+    "ResultLabel": "群聊安静模式",
+    "Api": 4,
+    "Kind": "message",
+    "Hooks": [
+      "chat.pre_reply"
+    ],
+    "Permissions": [
+      "system.full"
+    ],
+    "Settings": [
+      {
+        "Key": "groups",
+        "Name": "启用安静模式的群 ID",
+        "Type": "string",
+        "Default": "",
+        "Description": "填写微信会话 ID，以逗号分隔。留空时所有会话沿用宿主规则。"
+      }
+    ],
+    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/quiet-group-1.0.0.zip",
+    "Sha256": "4a2082c35d309dc23916c1e5997beb369e777b840259f1924f89d6e85144e3f4"
+  },
+  {
     "Id": "ruiping",
     "Name": "锐评",
     "Author": "Peelorange233",
