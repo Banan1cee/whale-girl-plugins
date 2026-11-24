@@ -5,7 +5,7 @@
  *
  * 群友发「点歌 起风了」后：
  *   1. 落单（cover order），由 timer.tick 起 breeze-prep.mjs；
- *   2. breeze-prep 用在线音源下原曲、切 54 秒副歌，再调 seed-vc 换声；
+ *   2. breeze-prep 用在线音源下原曲、切 30 秒副歌，再调 seed-vc 换声；
  *   3. 成品出来后用 whale.sendVoice 发 [[cover:<单号>]]，鲸鲸语音桥把
  *      它换成 breezeblue 音色的翻唱音频，录成微信语音发回群里。
  */
@@ -17,7 +17,6 @@ const path = require('node:path');
 
 const CLI_CANDIDATES = [
   path.join(os.homedir(), 'whale-cover', 'tools', 'cover.mjs'),
-  path.join(os.homedir(), '.dsh', 'profiles', 'desktop', 'node_modules', 'dsh-whale-cover', 'tools', 'cover.mjs'),
 ];
 
 const PREFIXES = ['点歌', '点播', '来一首', '來一首', 'cover'];
@@ -25,10 +24,12 @@ const HELP_WORDS = ['点歌帮助', '点歌说明', '点歌菜单', '点歌玩�
 const LIST_WORDS = ['点歌单', '点歌列表', '歌单', '点歌进度', '排队'];
 const CANCEL_RE = /^取消(?:点歌|点播)\s*(.*)$/;
 const SING_RE = /^(?:唱|唱一个|唱一首|来一段|发歌|发一下|听歌|听听)\s*[:：]?\s*(.*)$/;
+const GIVE_SONG_RE = /^把《(.+?)》(?:唱|放|发|送)给\s*([^\s，,。！!?？]{1,12}?)(?:听|吧|好吗|好不好)?$/;
+const GIVE_RE = /^(?:把)?(?:这?首?歌)?(?:唱|放|发|送)给\s*([^\s，,。！!?？]{1,12}?)(?:听|吧|好吗|好不好)?$/;
 const ORDER_RE = new RegExp('^(?:' + PREFIXES.join('|') + ')[\\s:：,，]*(.*)$', 'i');
 
 // 微信 UIA 发送会把换行压成空格，菜单必须写成一行，用「；」分隔。
-const MENU_TEXT = '点歌：点歌 歌名；指定原唱：点歌 歌名 - 歌手；自动下载并做 54 秒 breezeblue 音色翻唱；看队列：点歌单；撤单：取消点歌 歌名';
+const MENU_TEXT = '点歌：点歌 歌名；指定原唱：点歌 歌名 - 歌手；自动下载并做 30 秒 breezeblue 音色翻唱；发成品：唱 歌名；发给主人：把《歌名》唱给主人1/主人2听（单主人用主人）；看队列：点歌单；撤单：取消点歌 歌名';
 
 const recent = new Map(); // `${chatId}|${senderId}|${song}` -> ts，防微信重推导致重复落单
 
@@ -41,6 +42,40 @@ function cliPath(settings) {
   return CLI_CANDIDATES[0];
 }
 
+function runtimeRoot(settings) {
+  const cli = cliPath(settings);
+  return path.dirname(path.dirname(cli));
+}
+function voicePaths(settings) {
+  const root = runtimeRoot(settings);
+  return {
+    python: settings.voicePython || path.join(root, 'voice', 'venv', 'Scripts', 'python.exe'),
+    sender: settings.voiceSender || path.join(root, 'voice', 'send_cover.py'),
+  };
+}
+function coverWavPath(settings, order) {
+  const audio = String(order && order.audio || '').trim();
+  if (audio && fs.existsSync(audio)) return audio;
+  const work = path.join(dataRoot(settings), 'work', String(order && order.id || ''), 'cover.wav');
+  return fs.existsSync(work) ? work : '';
+}
+// 直接调用本地发送器：不依赖鲸鲸桥接补丁，也不需要宿主 sendVoiceFile 接口。
+function sendCoverVoice(settings, order, chatName) {
+  return new Promise((resolve) => {
+    const { python, sender } = voicePaths(settings);
+    const wav = coverWavPath(settings, order);
+    if (!wav) return resolve({ ok: false, error: '找不到成品音频' });
+    if (!fs.existsSync(python) || !fs.existsSync(sender)) {
+      return resolve({ ok: false, error: '语音发送器未安装' });
+    }
+    const args = [sender, '--wav', wav, '--chat', String(chatName || '')];
+    execFile(python, args, { timeout: 180000, windowsHide: true, maxBuffer: 2 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        const output = (String(stdout || '') + String(stderr || '')).trim();
+        resolve({ ok: !error && /OK/.test(output), output: output.slice(-500) });
+      });
+  });
+}
 function runCover(settings, args, timeoutMs) {
   return new Promise((resolve) => {
     const cli = cliPath(settings);
@@ -71,7 +106,8 @@ function whaleHome() {
   if (env && fs.existsSync(path.join(env, 'data', 'voice-send.json'))) return env;
   const candidates = [
     path.join(process.env.LOCALAPPDATA || '', 'Programs', 'WhaleGirl'),
-    'H:\\dshvx\\WhaleGirl',
+    path.join(process.env.ProgramFiles || '', 'WhaleGirl'),
+    path.join(process.env.ProgramW6432 || '', 'WhaleGirl'),
   ];
   for (const c of candidates) {
     try { if (fs.existsSync(path.join(c, 'data', 'voice-send.json'))) return c; } catch { /* ignore */ }
@@ -147,7 +183,7 @@ function dataRoot(settings) {
   const custom = settings && settings.dataDir ? String(settings.dataDir) : '';
   if (custom) return custom;
   if (process.env.WHALE_COVER_DATA_DIR) return process.env.WHALE_COVER_DATA_DIR;
-  return path.join(os.homedir(), '.dsh', 'whale-cover');
+  return path.join(os.homedir(), 'whale-cover', 'data');
 }
 
 function prepScriptPath(settings) {
@@ -219,10 +255,65 @@ function saveAuto(state) {
   try { fs.writeFileSync(AUTO_STATE, JSON.stringify(state)); } catch { /* data 目录不可写就只跑内存态 */ }
 }
 
-function groupTarget(order) {
+function chatTypeOf(message) {
+  return message.chatType === 'group' ? 'group' : 'private';
+}
+// 私聊的 chatId 在内核里不是 wxid，发送目标要用 senderId/昵称
+function chatKey(message) {
+  return String((message.chatType === 'group' ? message.chatId : (message.senderId || message.chatId)) || '');
+}
+function masterList() {
+  try {
+    const file = path.join(require('whale').paths.appRoot, 'data', 'config.json');
+    const cfg = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+    const master = (cfg.persona && cfg.persona.master) || {};
+    const ids = Array.isArray(master.wxids) ? master.wxids.map(String) : [];
+    const names = Array.isArray(master.names) ? master.names : [];
+    const titleMap = master.titles && typeof master.titles === 'object' && !Array.isArray(master.titles)
+      ? master.titles : {};
+    const titleList = Array.isArray(master.titles) ? master.titles : [];
+    const total = ids.length;
+    return ids.map((id, i) => ({
+      id,
+      index: i,
+      name: String(names[i] || id),
+      title: total > 1 ? '主人' + (i + 1) : '主人',
+      legacy: String(titleMap[id] || titleList[i] || ''),
+    })).filter(item => item.id);
+  } catch { return []; }
+}
+function titleOf(wxid) {
+  try {
+    const item = masterList().find(x => x.id === String(wxid || ''));
+    return item ? item.title : '';
+  } catch { return ''; }
+}
+function isMaster(wxid) {
+  return masterList().some(item => item.id === String(wxid || ''));
+}
+function masterNameOf(wxid) {
+  try {
+    const file = path.join(require('whale').paths.appRoot, 'data', 'config.json');
+    const cfg = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+    const master = (cfg.persona && cfg.persona.master) || {};
+    const ids = Array.isArray(master.wxids) ? master.wxids.map(String) : [];
+    const names = Array.isArray(master.names) ? master.names : [];
+    const index = ids.indexOf(String(wxid || ''));
+    return index >= 0 ? String(names[index] || '') : '';
+  } catch { return ''; }
+}
+function chatName(message) {
+  if (message.chatType === 'group') return String(message.chatTitle || message.chatId || '');
+  const senderId = String(message.senderId || '');
+  const direct = String(message.senderName || '');
+  if (direct && !direct.startsWith('wxid_')) return direct;
+  // 私聊消息的 senderName 可能是空或 wxid，搜不到会话；用主人备注名兜底
+  return masterNameOf(senderId) || direct || senderId || String(message.chatId || '');
+}
+function targetOf(order) {
   const id = String(order.group && order.group.id || '');
   if (!id) return null;
-  return { id, name: String(order.group.name || id), chatType: 'group' };
+  return { id, name: String(order.group.name || id), chatType: order.chatType === 'private' ? 'private' : 'group' };
 }
 
 // 群里点歌时 chatTitle 偶尔为空，导致 order.group.name 空、语音发不出去。
@@ -244,14 +335,15 @@ function fillGroupNames(orders) {
 // 把很久以前的成品重新发一遍。
 function isOurs(order) {
   if (!order || order.engine !== 'seedvc' || !(order.group && order.group.id)) return false;
+  if (order.via === 'proactive') return false; // 主动唱歌由 breeze-proactive 自己发，避免两个插件抢同一个单
   if (order.status === 'pending') return true; // 还没下载，source 为空
   return Boolean(order.source && /\.wav$/i.test(String(order.source)));
 }
 
 async function notifyGroup(whale, order, text) {
-  const target = groupTarget(order);
+  const target = targetOf(order);
   if (!whale || !target) return;
-  try { await whale.sendText(target.id, text, { name: target.name, chatType: 'group' }); } catch { /* 桥没起就算了 */ }
+  try { await whale.sendText(target.id, text, { name: target.name, chatType: target.chatType }); } catch { /* 桥没起就算了 */ }
 }
 
 const SONG_EXTS = new Set(['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.opus', '.wma']);
@@ -316,7 +408,7 @@ function startRender(settings, order, source) {
 function startPrep(settings, order) {
   const prep = prepScriptPath(settings);
   if (!fs.existsSync(prep)) throw new Error('缺少 breeze-prep.mjs：' + prep);
-  const python = settings.python || path.join(os.homedir(), '.dsh', 'whale-cover', 'engine', 'venv', 'Scripts', 'python.exe');
+  const python = settings.python || path.join(os.homedir(), 'whale-cover', 'engine', 'venv', 'Scripts', 'python.exe');
   const repo = path.dirname(path.dirname(cliPath(settings)));
   const repoFfmpeg = path.join(repo, 'tools', 'ffmpeg');
   const ffmpegDir = settings.ffmpeg || (fs.existsSync(path.join(repoFfmpeg, 'ffmpeg.exe')) ? repoFfmpeg : path.join(path.dirname(repo), 'tools', 'ffmpeg'));
@@ -331,6 +423,7 @@ function startPrep(settings, order) {
       BREEZE_CLI: cliPath(settings),
       BREEZE_PYTHON: python,
       BREEZE_DATA: dataRoot(settings),
+      BREEZE_COOKIES: settings.neteaseCookies || path.join(dataRoot(settings), 'cookies.txt'),
       BREEZE_ENGINE: settings.engine || 'seedvc',
       BREEZE_FFMPEG_DIR: ffmpegDir,
       BREEZE_CACHE: path.join(repo, '.tmp', 'breeze-cache'),
@@ -344,32 +437,50 @@ function startPrep(settings, order) {
 }
 
 async function deliverReady(whale, settings, order, state) {
-  const target = groupTarget(order);
+  const target = targetOf(order);
   if (!whale || !target) return false;
   if (state.sent && state.sent[order.id]) return true;
 
-  const ensured = await runCover(settings, ['voice', 'ensure'], 10000);
-  if (!ensured || !ensured.ok) return false;
-
-  try {
-    const sent = await whale.sendVoice(target.id, `[[cover:${order.id}]]`, {
-      name: target.name,
-      chatType: 'group',
-    });
-    if (!sent || !sent.id) return false;
-  } catch { return false; }
+  const result = await sendCoverVoice(settings, order, target.name || target.id);
+  if (!result.ok) return false;
 
   state.sent = state.sent || {};
   state.sent[order.id] = Date.now();
   try {
-    await whale.sendText(target.id, `做好了～《${order.song}》`, { name: target.name, chatType: 'group' });
-  } catch { /* 语音已经排上，短句发不出去不重试 */ }
+    const delay = (Number(order.durationSec) || 30) * 1000 + 12000;
+    const title = target.chatType === 'private' ? titleOf(target.id) : '';
+    state.followups = Array.isArray(state.followups) ? state.followups : [];
+    state.followups.push({
+      id: target.id,
+      name: target.name,
+      text: (title ? title + '，' : '') + '我唱了《' + order.song + '》，你觉得好听吗？',
+      chatType: target.chatType,
+      dueAt: Date.now() + delay,
+    });
+    saveAuto(state);
+  } catch { /* 追问发不出去不影响语音 */ }
   return true;
+}
+
+async function flushFollowups(whale, state) {
+  const pending = Array.isArray(state.followups) ? state.followups : [];
+  if (!pending.length) return;
+  const now = Date.now();
+  const keep = [];
+  for (const item of pending) {
+    if (Number(item.dueAt) > now) { keep.push(item); continue; }
+    try {
+      await whale.sendText(item.id, item.text, { name: item.name, chatType: item.chatType || 'private' });
+    } catch { /* 发不出去就丢掉，不积压 */ }
+  }
+  state.followups = keep;
+  saveAuto(state);
 }
 
 async function autoTick(whale, settings) {
   if (!whale || settings.autoRender === false) return;
   const state = loadAuto();
+  await flushFollowups(whale, state);
   const out = await runCover(settings, ['list', '--status', 'pending,making,ready', '--limit', '100'], 10000);
   if (!out || !out.ok) return;
   const orders = fillGroupNames(Array.isArray(out.orders) ? out.orders : []);
@@ -386,9 +497,6 @@ async function autoTick(whale, settings) {
   if (active && !isOurs(active)) active = null;
   if (state.active && (!active || !isOurs(active))) { state.active = null; saveAuto(state); }
 
-  if (active && (active.status === 'making' || (active.status === 'pending' && state.active.prep))) {
-    await maybeReportProgress(whale, settings, active, state);
-  }
 
   // 内核/插件重启后 state.active 可能丢了；已经 ready 但没发过的单要补发。
   if (!active) {
@@ -529,7 +637,6 @@ async function autoTick(whale, settings) {
       state.progressStartedAt = Date.now();
       state.lastProgressAt = Date.now();
       saveAuto(state);
-      await notifyGroup(whale, next, `收到《${next.song}》，正在下载原曲、切 ${Number(settings.maxSeconds) || 60} 秒副歌～`);
     } catch (error) {
       state.failedAt = state.failedAt || {};
       state.failedAt[next.id] = Date.now();
@@ -566,6 +673,18 @@ function cleanText(raw) {
 }
 
 /** 「点歌 起风了 - 买辣椒也用券（女声）」→ { song, artist, note } */
+function commandText(raw) {
+  const text = cleanText(raw);
+  if (text.length <= 60) return text;
+  const lines = text.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (SING_RE.test(line) || ORDER_RE.test(line) || CANCEL_RE.test(line)
+      || HELP_WORDS.includes(line) || LIST_WORDS.includes(line)
+      || GIVE_RE.test(line) || GIVE_SONG_RE.test(line)) return line;
+  }
+  return text;
+}
 function parseOrder(text) {
   const m = ORDER_RE.exec(text);
   if (!m) return null;
@@ -593,7 +712,8 @@ function parseOrder(text) {
 function nameFor(message) {
   const isGroup = message.chatType === 'group';
   if (isGroup) return message.chatTitle || message.chatId;
-  return message.senderName || message.senderId || message.chatId;
+  // 私聊的 senderName 可能为空/是 wxid，桥接按 wxid 搜不到会直接失败；用主人备注名兜底
+  return chatName(message);
 }
 
 function chatFor(message) {
@@ -624,25 +744,30 @@ async function handleOrder(whale, message, settings, parsed) {
   if (recent.has(key)) return true;
   recent.set(key, now);
 
+  const targetId = chatKey(message);
+  const targetName = chatName(message);
   const args = [
     'order',
     '--song', parsed.song,
     '--requester', me,
-    '--via', 'group',
+    '--via', chatTypeOf(message),
+    '--chat-type', chatTypeOf(message),
     '--engine', settings.engine || 'seedvc',
-    '--group-id', String(message.chatId || ''),
+    '--group-id', String(targetId || ''),
   ];
-  if (message.chatTitle) args.push('--group-name', String(message.chatTitle));
+  if (targetName) args.push('--group-name', String(targetName));
   if (parsed.artist) args.push('--artist', parsed.artist);
   if (parsed.note) args.push('--note', parsed.note);
   if (message.senderId) args.push('--wxid', String(message.senderId));
 
+  const isPrivate = chatTypeOf(message) === 'private';
+  if (isPrivate) await reply(whale, message, '是《' + parsed.song + '》对吧，我先找原曲～');
   const out = await runCover(settings, args, 15000);
   if (!out || !out.ok) {
     await reply(whale, message, '这张单没接住，等会儿再点一次。');
     return true;
   }
-  await reply(whale, message, okText(out.order, out.position));
+  if (!isPrivate) await reply(whale, message, okText(out.order, out.position));
   return true;
 }
 
@@ -731,7 +856,7 @@ async function handleList(whale, message, settings) {
     await reply(whale, message, '队列暂时读不出来。');
     return;
   }
-  const mine = (out.orders || []).filter((o) => !o.group || !o.group.id || String(o.group.id) === String(message.chatId));
+  const mine = (out.orders || []).filter((o) => !o.group || !o.group.id || String(o.group.id) === String(chatKey(message)));
   const { keep } = dedupeActive(mine);
   const active = keep.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   if (!active.length) {
@@ -758,7 +883,7 @@ async function handleCancel(whale, message, settings, wanted) {
   const names = new Set([message.senderName, message.senderId].filter(Boolean).map(String));
   const mine = (out.orders || []).filter((o) => ['pending', 'making'].includes(o.status)
     && (names.has(String(o.wxid || '')) || names.has(String(o.requester || '')))
-    && (!o.group || !o.group.id || String(o.group.id) === String(message.chatId)));
+    && (!o.group || !o.group.id || String(o.group.id) === String(chatKey(message))));
   const target = mine.find((o) => o.song === wanted) || (mine.length === 1 && !wanted ? mine[0] : null);
   if (!target) {
     await reply(whale, message, wanted ? `没找到你点的《${wanted}》。` : '你现在没有在排队的歌。');
@@ -782,39 +907,235 @@ async function handleSing(whale, message, settings, wanted) {
     return;
   }
   const ready = (out.orders || []).filter((o) => ['ready', 'delivered'].includes(o.status)
-    && (o.hasAudio || o.durationSec)
-    && (!o.group || !o.group.id || String(o.group.id) === String(message.chatId)));
+    && (o.hasAudio || o.durationSec));
+  const mine = ready.filter((o) => !o.group || !o.group.id || String(o.group.id) === String(chatKey(message)));
   const want = String(wanted || '').trim();
-  const target = want
-    ? ready.find((o) => o.id === want) || ready.find((o) => o.song === want) || ready.find((o) => o.song.includes(want))
-    : ready[0];
+  const findBy = (list) => (want
+    ? list.find((o) => o.id === want) || list.find((o) => o.song === want) || list.find((o) => o.song.includes(want))
+    : list[0]);
+  const target = findBy(mine) || findBy(ready);
   if (!target) {
     await reply(whale, message, want
       ? `《${want}》还没唱好，等做好了再喊我。`
-      : '这个群还没有唱好的歌，先点一首吧。');
-    return;
-  }
-
-  const ensured = await runCover(settings, ['voice', 'ensure'], 25000);
-  if (!ensured || !ensured.ok) {
-    await reply(whale, message, '语音通道没起来，先把鲸鲸的微信桥打开。');
+      : '这里还没有唱好的歌，先点一首吧。');
     return;
   }
 
   try {
     const isGroup = message.chatType === 'group';
-    const sent = await whale.sendVoice(chatFor(message), `[[cover:${target.id}]]`, {
+    const sent = await sendCoverVoice(settings, target, nameFor(message));
+    if (!sent.ok) throw new Error(sent.error || '发送失败');
+    const followTitle = isGroup ? '' : titleOf(chatFor(message));
+    const state = loadAuto();
+    state.followups = Array.isArray(state.followups) ? state.followups : [];
+    state.followups.push({
+      id: chatFor(message),
       name: nameFor(message),
+      text: (followTitle ? followTitle + '，' : '') + '我唱了《' + target.song + '》，你觉得好听吗？',
       chatType: isGroup ? 'group' : 'private',
+      dueAt: Date.now() + (Number(target.durationSec) || 30) * 1000 + 12000,
     });
-    if (!sent || !sent.id) throw new Error('没有排上');
+    saveAuto(state);
   } catch {
     await reply(whale, message, '这段没发出去，等会儿再试。');
     return;
   }
-  // 语音要录几十秒，先回一句短的，免得群里以为没反应
-  await reply(whale, message, `来了～《${target.song}》`);
 }
+
+async function handleGive(whale, message, settings, targetWord, songWord) {
+  if (!isMaster(message.senderId)) {
+    await reply(whale, message, '只有主人可以让我唱给别人听。');
+    return;
+  }
+  const list = masterList();
+  const key = String(targetWord || '').trim();
+  const target = (key === '主人' && list.length === 1) ? list[0]
+    : list.find(item => item.title === key || item.name === key || item.legacy === key
+      || (item.legacy && item.legacy.includes(key))
+      || (item.title && item.title.includes(key)) || (item.name && item.name.includes(key)));
+  if (!target) {
+    await reply(whale, message, '没找到「' + key + '」，我只认识：' + list.map(item => item.title || item.name).join('、'));
+    return;
+  }
+  const out = await runCover(settings, ['list', '--limit', '100'], 15000);
+  if (!out || !out.ok) {
+    await reply(whale, message, '队列暂时读不出来。');
+    return;
+  }
+  const ready = (out.orders || []).filter(o => ['ready', 'delivered'].includes(o.status)
+    && (o.hasAudio || o.durationSec));
+  const song = String(songWord || '').trim();
+  const order = song
+    ? ready.find(o => o.song === song) || ready.find(o => o.song.includes(song))
+    : ready[ready.length - 1];
+  if (!order) {
+    await reply(whale, message, song ? '《' + song + '》还没唱好。' : '还没有唱好的歌。');
+    return;
+  }
+  const from = String(message.senderName || '主人');
+  try {
+    await whale.sendText(target.id, from + '让我把这首《' + order.song + '》唱给你听～',
+      { name: target.name, chatType: 'private' });
+    const sent = await sendCoverVoice(settings, order, target.name || target.legacy || target.id);
+    if (!sent.ok) throw new Error(sent.error || '发送失败');
+    const delay = (Number(order.durationSec) || 30) * 1000 + 12000;
+    const state = loadAuto();
+    state.followups = Array.isArray(state.followups) ? state.followups : [];
+    state.followups.push({
+      id: target.id,
+      name: target.name,
+      text: (target.title || target.name) + '，我唱了《' + order.song + '》，你觉得好听吗？',
+      dueAt: Date.now() + delay,
+    });
+    saveAuto(state);
+  } catch {
+    await reply(whale, message, '没发出去，等会儿再试。');
+    return;
+  }
+  await reply(whale, message, '好，《' + order.song + '》已安排给' + (target.title || target.name) + '，35 秒内微信保持前台；没收到就再发一次。');
+}
+
+// ===== 闲时主动唱歌（可单主人/双主人） =====
+const PROACTIVE_EXTS = new Set(['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.opus', '.wma']);
+
+function proactiveStatePath() {
+  return path.join(require('whale').paths.pluginData, 'proactive-state.json');
+}
+function proactiveLoad() {
+  try { return JSON.parse(fs.readFileSync(proactiveStatePath(), 'utf8')) || {}; } catch { return {}; }
+}
+function proactiveSave(state) {
+  try { fs.writeFileSync(proactiveStatePath(), JSON.stringify(state)); } catch { /* ignore */ }
+}
+function proactiveDay() { return new Date().toISOString().slice(0, 10); }
+function proactiveHhmm() {
+  const d = new Date();
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+function proactiveQuiet(settings) {
+  const start = String(settings.proactiveQuietStart || '22:30');
+  const end = String(settings.proactiveQuietEnd || '09:00');
+  const now = proactiveHhmm();
+  return start <= end ? (now >= start && now < end) : (now >= start || now < end);
+}
+async function proactiveIdleOk(whale, settings) {
+  try {
+    const res = await whale.api('/api/status');
+    const gateway = res && res.body && res.body.gateways && res.body.gateways[0];
+    if (!gateway) return false;
+    const last = Number(gateway.lastMessageAt) || 0;
+    const minutes = Math.max(5, Number(settings.proactiveIdleMinutes) || 120);
+    if (!last) return true;
+    if (Date.now() - last < minutes * 60000) return false;
+    return !!(gateway.bridge && gateway.bridge.online && gateway.bridge.uia);
+  } catch { return false; }
+}
+function proactiveSongList(settings) {
+  try {
+    const dir = path.join(dataRoot(settings), 'songs');
+    return fs.readdirSync(dir).filter(name => PROACTIVE_EXTS.has(path.extname(name).toLowerCase()))
+      .map(name => ({ file: name, key: path.basename(name, path.extname(name)) }));
+  } catch { return []; }
+}
+function scheduleFollowup(state, chatId, name, text, delayMs, chatType) {
+  state.followups = Array.isArray(state.followups) ? state.followups : [];
+  state.followups.push({ id: chatId, name, text, chatType: chatType || 'private', dueAt: Date.now() + delayMs });
+}
+async function proactiveDeliver(whale, settings, order, target) {
+  try {
+    await whale.sendText(target.id, '突然想唱首歌给你听～《' + order.song + '》', {
+      name: target.name, chatType: 'private',
+    });
+    const sent = await sendCoverVoice(settings, order, target.name || target.id);
+    if (!sent.ok) throw new Error(sent.error || '发送失败');
+    const state = loadAuto();
+    scheduleFollowup(state, target.id, target.name,
+      (target.title ? target.title + '，' : '') + '我唱了《' + order.song + '》，你听听看喜欢吗～',
+      (Number(order.durationSec) || 30) * 1000 + 15000, 'private');
+    saveAuto(state);
+    return true;
+  } catch { return false; }
+}
+async function proactiveTick(whale, settings) {
+  if (!whale || settings.proactiveEnabled === false) return;
+  if (settings.autoRender === false) return;
+  const listed = await runCover(settings, ['list', '--status', 'pending,making,ready', '--limit', '100'], 10000);
+  if (!listed || !listed.ok) return;
+  const orders = Array.isArray(listed.orders) ? listed.orders : [];
+  const masters = masterList();
+  if (!masters.length) return;
+  const st = proactiveLoad();
+  const today = proactiveDay();
+  if (st.day !== today) { st.day = today; st.count = 0; }
+
+  if (st.active && st.active.id) {
+    const order = orders.find(o => o.id === st.active.id);
+    if (!order) st.active = null;
+    else if (order.status === 'ready') {
+      const target = st.active.target || masters[0];
+      if (await proactiveDeliver(whale, settings, order, target)) {
+        st.sung = st.sung || {};
+        st.sung[order.song] = Date.now();
+        st.count = (Number(st.count) || 0) + 1;
+        st.lastAt = Date.now();
+        if (!st.delivered) st.delivered = {};
+        st.delivered[order.id] = Date.now();
+        st.active = null;
+      }
+    } else if (order.status === 'failed' || order.status === 'canceled') {
+      st.active = null;
+    }
+    proactiveSave(st);
+    if (st.active) return;
+  }
+
+  if (proactiveQuiet(settings)) return;
+  if ((Number(st.count) || 0) >= Math.max(1, Number(settings.proactiveDailyMax) || 2)) return;
+  if (st.lastAt && Date.now() - st.lastAt < (Number(settings.proactiveCooldownMinutes) || 360) * 60000) return;
+  if (!(await proactiveIdleOk(whale, settings))) return;
+
+  const sung = st.sung || {};
+  const readySongs = new Set(orders.filter(o => o.status === 'ready').map(o => o.song));
+  const ready = orders.filter(o => o.status === 'ready' && (o.hasAudio || o.durationSec)
+    && !sung[o.song] && !(st.delivered && st.delivered[o.id]));
+  if (ready.length) {
+    const order = ready[ready.length - 1];
+    const target = masters[(Number(st.targetIndex) || 0) % masters.length];
+    if (await proactiveDeliver(whale, settings, order, target)) {
+      st.sung = sung;
+      st.sung[order.song] = Date.now();
+      st.count = (Number(st.count) || 0) + 1;
+      st.lastAt = Date.now();
+      if (!st.delivered) st.delivered = {};
+      st.delivered[order.id] = Date.now();
+      st.targetIndex = (Number(st.targetIndex) || 0) + 1;
+    }
+    proactiveSave(st);
+    return;
+  }
+
+  const pool = proactiveSongList(settings).filter(s => !sung[s.key] && !readySongs.has(s.key));
+  let songName = pool.length ? pool[Math.floor(Math.random() * pool.length)].key : '';
+  if (!songName && settings.allowDownload !== false) {
+    const cands = (Array.isArray(settings.downloadCandidates) ? settings.downloadCandidates : [])
+      .filter(n => n && !sung[n] && !readySongs.has(n));
+    if (cands.length) songName = cands[Math.floor(Math.random() * cands.length)];
+  }
+  if (!songName) return;
+
+  const target = masters[(Number(st.targetIndex) || 0) % masters.length];
+  const out = await runCover(settings, ['order', '--song', songName, '--requester', '鲸鲸',
+    '--via', 'proactive', '--chat-type', 'private',
+    '--engine', settings.engine || 'seedvc',
+    '--group-id', target.id, '--group-name', target.name], 15000);
+  if (!out || !out.ok) return;
+  let pid = 0;
+  try { pid = startPrep(settings, out.order); } catch { pid = 0; }
+  st.active = { id: out.order.id, song: out.order.song, at: Date.now(), pid, target };
+  st.targetIndex = (Number(st.targetIndex) || 0) + 1;
+  proactiveSave(st);
+}
+
 
 module.exports = {
   parseOrder,
@@ -832,7 +1153,7 @@ module.exports = {
         return { action: 'skip' };
       }
 
-      const text = cleanText(message.text);
+      const text = commandText(message.text);
       if (!text) return { action: 'pass' };
 
       if (HELP_WORDS.includes(text)) {
@@ -846,6 +1167,14 @@ module.exports = {
       const cancel = CANCEL_RE.exec(text);
       if (cancel) {
         await handleCancel(whale, message, settings, cancel[1].trim());
+        return { action: 'skip' };
+      }
+      const giveSong = GIVE_SONG_RE.exec(text);
+      const givePlain = giveSong ? null : GIVE_RE.exec(text);
+      if (giveSong || givePlain) {
+        await handleGive(whale, message, settings,
+          giveSong ? giveSong[2] : givePlain[1],
+          giveSong ? giveSong[1] : '');
         return { action: 'skip' };
       }
       const sing = SING_RE.exec(text);
@@ -868,6 +1197,7 @@ module.exports = {
     async 'timer.tick'(input) {
       try {
         await autoTick(input.whale, input.settings || {});
+        await proactiveTick(input.whale, input.settings || {});
       } catch (e) {
         try { fs.appendFileSync(AUTO_LOG, `[${new Date().toISOString()}] timer.tick: ${e && e.message || e}\n`); } catch { /* ignore */ }
       }

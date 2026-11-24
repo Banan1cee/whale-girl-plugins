@@ -1,58 +1,100 @@
 # Breezeblue 翻唱（breeze-sing）
 
-群聊点歌插件：点歌后自动搜索音源、切 54 秒副歌，用 breezeblue 音色经本地 seed-vc 翻唱，完成后把语音发回群。
+点歌插件：群聊/私聊点歌后自动找音源、切 30 秒副歌，用 breezeblue 音色经本机 seed-vc 翻唱，并通过**本地发送器直接发成微信语音**。
 
 ## 重要：不是纯 JS 单文件插件
 
-本插件是 Api 4 完整权限插件，但它依赖本机已安装的配套运行时，无法只靠 ZIP 独立工作：
+本插件是 Api 4 完整权限插件，但需要本机配套运行时；运行时由独立安装器部署，**不修改鲸鲸主程序、不需要宿主语音补丁**：
 
-- Windows + NVIDIA GPU（已在 GTX 1050 Ti 4GB / CUDA 12.1 / torch 2.4.1+cu121 验证）
-- 本机存在 `%USERPROFILE%\whale-cover`（或通过 `settings.coverCli` 指向其他位置），其中包含 CLI、Python venv、seed-vc、ffmpeg、参考音与模型
-- 鲸鲸 4.1.2+，并已加载本地语音发送补丁（`WhaleLauncher-patched.exe` + `bridge/voice_reply.py` 的 `[[cover:` 分流）
-- 微信 PC 端目标会话需在前台，语音工作进程才能确认会话
+- Windows 10/11 x64 + NVIDIA GPU（建议 ≥6GB 显存）
+- 微信 PC 4.2
+- 鲸鲸 4.1.2+
+- 磁盘 ≥10GB
+- 安装器负责：Python/torch/seed-vc/模型/ffmpeg、语音发送 venv、VB-CABLE、参考音、插件写入
 
-若审核要求“ZIP 双击即可独立运行”，本插件不满足，请先不要合并；需要配套安装器或改为云端服务。
+安装器项目：`Breezeblue-Sing-Installer-0.9.0.zip`（与本插件一起发布，不随市场 ZIP 分发运行时）。
+
+## 它与旧版的区别
+
+- 不再依赖 `[[cover:<id>]]` + 鲸鲸 bridge 补丁；
+- 插件直接调用运行时里的 `voice\send_cover.py`，由它打开/核验微信会话、按住 Ctrl+Tab、把音频播进 CABLE Input、确认语音条；
+- 因此原版鲸鲸即可使用，不需要改 `src/`、`bridge/` 或替换 EXE。
 
 ## 安装
 
-1. 鲸鲸 4.1.2+ 打开「插件市场 → 从本地安装」，选择 `breeze-sing-0.6.3.zip`，确认 `system.full` 权限。
-2. 确保配套运行时存在，且在插件卡片「设置」中按需填写：
+1. 先运行安装器（提供运行时、发送器、VB-CABLE、参考音、插件写入）；
+2. 打开鲸鲸「插件市场 → 已安装 → Breezeblue 翻唱 → 设置」确认路径；
+3. 重启鲸鲸内核，私聊点一首歌做冒烟测试。
+
+设置示例：
 
 ```json
 {
   "coverCli": "%USERPROFILE%\\whale-cover\\tools\\cover.mjs",
-  "onlyGroup": true,
-  "autoRender": true,
+  "python": "%USERPROFILE%\\whale-cover\\engine\\venv\\Scripts\\python.exe",
+  "ffmpeg": "%USERPROFILE%\\whale-cover\\tools\\ffmpeg",
+  "dataDir": "%USERPROFILE%\\whale-cover\\data",
+  "voicePython": "%USERPROFILE%\\whale-cover\\voice\\venv\\Scripts\\python.exe",
+  "voiceSender": "%USERPROFILE%\\whale-cover\\voice\\send_cover.py",
   "engine": "seedvc",
-  "maxSeconds": 54
+  "maxSeconds": 30,
+  "onlyGroup": false,
+  "neteaseCookies": "%USERPROFILE%\\whale-cover\\cookies.txt",
+  "proactiveEnabled": true,
+  "proactiveIdleMinutes": 120,
+  "proactiveDailyMax": 2,
+  "proactiveQuietStart": "22:30",
+  "proactiveQuietEnd": "09:00",
+  "proactiveCooldownMinutes": 360,
+  "allowDownload": true,
+  "downloadCandidates": ["晴天", "后来", "小幸运"]
 }
 ```
 
-3. 在目标群发「点歌 歌名」或「点歌 歌名 - 原唱」。
+- `neteaseCookies` 只填 **cookie 文件路径**，插件不保存、不打包账号数据。
+- 单主人/双主人都支持：双主人显示「主人1/主人2」，单主人显示「主人」。
+- 主动唱歌默认开启；`proactiveEnabled: false` 关闭。
 
 ## 命令
 
-- `点歌 起风了`
-- `点歌 起风了 - 买辣椒也用券`
-- `点歌单`：查看去重后的队列
-- `取消点歌 起风了`
+- `点歌 起风了` / `点歌 起风了 - 买辣椒也用券`
+- 私聊点歌先回 `是《起风了》对吧，我先找原曲～`；群聊回排队位次
+- `点歌单`、`取消点歌 起风了`
+- `唱 安荣`
+- `把《安荣》唱给主人2听`（单主人用「主人」；也兼容配置里的旧称呼）
+- 唱完约 12 秒补一句“我唱了《歌名》，你觉得好听吗？”
+- 闲时主动唱歌：文字 → 语音 → 追问
 
 ## 测试用例
 
-| 输入 | 预期 |
-| --- | --- |
-| 群里发「点歌 起风了」 | 回复排第 N 位；自动搜音源、切副歌，约 7–10 分钟后发 54 秒语音 + 「做好了～《起风了》」 |
-| 群里发「点歌单」 | 同一群同歌名/歌手只显示一条；失败单不显示 |
-| 私聊发「点歌 起风了」 | 不接管，交给鲸鲸正常聊天（`onlyGroup:true`） |
-| 音源搜索失败 | 群里回「音源下载失败…」，不会卡在 making |
+| 组 | 输入 | 预期 |
+| --- | --- | --- |
+| 1 点歌 | 群里发 `点歌 起风了` | 回排队位次；完成后 30 秒语音，无“收到/进度/做好了”过程话术 |
+| 2 私聊点歌 | 私聊发 `点歌 起风了` | 立即回 `是《起风了》对吧，我先找原曲～`；完成后语音 + 追问 |
+| 3 唱成品 | 私聊发 `唱 安荣` | 只发语音；约 12 秒后补“主人1，我唱了《安荣》，你觉得好听吗？” |
+| 4 唱给主人 | 私聊发 `把《安荣》唱给主人2听` | 给主人2发“主人1让我把这首《安荣》唱给你听～”+ 语音 + 追问；回执 |
+| 5 容错 | 私聊发 `唱 不存在的歌` | 回“《不存在的歌》还没唱好，等做好了再喊我。” |
+
+第 1–4 组需要运行时、VB-CABLE、微信前台；仅验证安装/设置时测第 5 组。
 
 ## 已知限制
 
-- 54 秒是 WhaleGirl 语音工作进程 55 秒上限下的成品长度，不是完整歌曲。
-- 免费音源可能只有翻唱/Live 版；VIP 原唱没有可下载地址。
-- 语音发送依赖微信前台窗口；窗口被切走会报 `uncertain 无法确认当前微信会话`。
-- 首次使用需配置好 seed-vc 参考音（`cover engine ref`）与引擎检查（`cover engine rvc check` 不适用；本插件用 `seedvc`）。
+- 成品是副歌片段，不是完整歌曲；音源可能只有翻唱/Live 版。
+- 语音发送依赖微信 UIA 与前台窗口；被遮挡或窗口切走会失败并提示，不会发到错误会话。
+- 渲染约 8–14 分钟（6GB 显卡建议 ≤30 秒），由独立子进程完成，插件 timer 只轮询状态。
+- 换机器需迁移运行时数据（`dataDir` 下 orders/work）。
+- 微信升级可能破坏 UIA；当前只保证 4.2。
+
+## 0.9.0
+
+- 改为本地发送器直连，不再需要鲸鲸宿主补丁。
+- 支持主安装器写入插件/设置。
+- 保留私聊点歌、全局 `唱`、`唱给主人`、闲时主动唱歌、网易云 cookies 路径、30 秒成品。
+
+## 0.8.0
+
+- 主人1/主人2 称呼、私聊即时确认、主动唱歌、过程话术清理。
 
 ## 0.6.3
 
-- 修复英文歌名中的空格被错误拆成原唱（如 `see you again`）。
+- 修复英文歌名空格被误拆成原唱。
