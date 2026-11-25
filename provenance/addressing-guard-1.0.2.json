@@ -1,0 +1,11 @@
+{
+  "publisher": {
+    "login": "linjiaspace",
+    "id": 93174175
+  },
+  "source": {
+    "repository": "linjiaspace/whale-girl-plugins",
+    "commit": "8ce2c70f475b04bab72a85e2078f2ce9a72b1dd9",
+    "path": "plugins/addressing-guard"
+  }
+}
