@@ -1,0 +1,63 @@
+{
+  "Id": "addressing-guard",
+  "Name": "对话归属识别",
+  "Author": "linjiaspace",
+  "Version": "1.0.2",
+  "MinAppVersion": "4.1.2",
+  "Description": "群聊「接话窗口」内判断当前这句指的是机器人还是群里另一个人：对机器人说→正常回复，对别人说→不插嘴。用模型做语义判定（BOT/OTHER/UNSURE），窗口内只要含「你」、含疑问词或不超过 30 字就交给模型判，不再依赖 history 反推「她上次接谁的话」（assistant 消息没有回复对象字段，反推不可靠）；带缓存、超时、熔断；明确 @/引用/点名一律放行，模型失败一律放行不误拦。",
+  "Settings": [
+    {
+      "Key": "enabled",
+      "Name": "总开关",
+      "Type": "boolean",
+      "Default": true,
+      "Description": "关闭后插件完全不干预"
+    },
+    {
+      "Key": "botNames",
+      "Name": "机器人名字（逗号分隔）",
+      "Type": "string",
+      "Default": "鲸鲸,小鲸,大肥鱼,鲸鱼娘",
+      "Description": "正文提到任一名字就放行；支持数组或逗号分隔字符串"
+    },
+    {
+      "Key": "windowMs",
+      "Name": "接话窗口（毫秒）",
+      "Type": "number",
+      "Default": 360000,
+      "Description": "她上次说话后多少毫秒内需要判断归属（与宿主 group.engagedMinutes 默认 6 分钟对齐）；超出交回宿主原逻辑（不拦）"
+    },
+    {
+      "Key": "modelTimeoutMs",
+      "Name": "模型判定超时（毫秒）",
+      "Type": "number",
+      "Default": 12000,
+      "Description": "单次判定调用超时，超时按放行处理（实测偶发 11 秒慢请求，故放宽到 12 秒）"
+    },
+    {
+      "Key": "useModel",
+      "Name": "启用模型判定",
+      "Type": "boolean",
+      "Default": true,
+      "Description": "关掉后只做快筛，不调模型（会漏判）"
+    },
+    {
+      "Key": "cacheTtlMs",
+      "Name": "判定缓存有效期（毫秒）",
+      "Type": "number",
+      "Default": 600000,
+      "Description": "同一条消息的判定结果缓存多久"
+    }
+  ],
+  "ResultLabel": "归属判定",
+  "Api": 4,
+  "Kind": "message",
+  "Hooks": [
+    "chat.pre_reply"
+  ],
+  "Permissions": [
+    "system.full"
+  ],
+  "ExecutionTimeoutMs": 15000,
+  "IntervalSeconds": 60
+}
