@@ -4,7 +4,7 @@
   "Author": "RacOrange",
   "Version": "1.0.4",
   "MinAppVersion": "4.1.2",
-  "Description": "群聊和私聊点歌、查看或取消订单、播放已有翻唱成品。本机 seed-vc 渲染整首并在停顿处分为多条语音，通过独立发送器发送微信语音。需要配套 Windows 运行时，支持网易云 cookies 路径。 可选闲时主动唱歌，默认关闭，仅限已绑定主人的私聊。 可选主人私聊发起的白名单代发唱歌，由同一主人二次确认。",
+  "Description": "群聊与私聊可点歌。本机渲染整首翻唱，按乐句停顿分段发微信语音。支持任选网易云喜欢曲目、闲时主动唱歌和已绑定主人确认的白名单代发。需要配套 Windows 运行时。支持 WAV 附件的宿主可启用长歌格式选择。",
   "ResultLabel": "翻唱语音",
   "Api": 4,
   "Kind": "message",
@@ -15,6 +15,6 @@
   "Permissions": [
     "system.full"
   ],
-  "ExecutionTimeoutMs": 20000,
+  "ExecutionTimeoutMs": 120000,
   "IntervalSeconds": 10
 }

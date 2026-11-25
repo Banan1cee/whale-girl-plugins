@@ -26,6 +26,7 @@ const HELP_WORDS = ['点歌帮助', '点歌说明', '点歌菜单', '点歌玩�
 const LIST_WORDS = ['点歌单', '点歌列表', '歌单', '点歌进度', '排队'];
 const CANCEL_RE = /^取消(?:点歌|点播)\s*(.*)$/;
 const SING_RE = /^(?:唱|唱一个|唱一首|来一段|发歌|发一下|听歌|听听)\s*[:：]?\s*(.*)$/;
+const LIKED_ORDER = /^(?:(?:点歌|点播|来一首)\s*)?(?:从我喜欢里?随便挑一首唱?|从我喜欢里?挑一首唱?|我喜欢的|喜欢的歌|随便挑一首喜欢的唱?)$/;
 const ORDER_RE = new RegExp('^(?:' + PREFIXES.join('|') + ')[\\s:：,，]*(.*)$', 'i');
 
 // 微信 UIA 发送会把换行压成空格，菜单必须写成一行，用「；」分隔。
@@ -203,7 +204,7 @@ function sendCoverFile(settings, target, wav, file, request = '') {
   try {
     const child = spawn(py, [script, '--wav', wavPath, '--chat', target.name,
       '--chat-type', target.chatType, '--result-file', file], {
-      detached: true, windowsHide: true, stdio: 'ignore',
+      detached: true, windowsHide: false, stdio: 'ignore',
     });
     child.once('error', failStart);
     child.unref();
@@ -283,7 +284,13 @@ function saveAuto(state) {
   const stopped = state.voiceStopped || {};
   for (const [id, at] of Object.entries(stopped)) if (!(Number(at) > cutoff)) delete stopped[id];
   state.voiceStopped = stopped;
-  try { fs.writeFileSync(AUTO_STATE, JSON.stringify(state)); } catch { /* data 目录不可写就只跑内存态 */ }
+  const temporary = AUTO_STATE + '.' + crypto.randomUUID() + '.tmp';
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(state), { flag: 'wx', mode: 0o600 });
+    fs.renameSync(temporary, AUTO_STATE);
+    return true;
+  } catch { return false; }
+  finally { try { fs.unlinkSync(temporary); } catch { /* 已提交或未创建 */ } }
 }
 
 function groupTarget(order) {
@@ -321,7 +328,10 @@ function isOurs(order) {
 async function notifyGroup(whale, order, text) {
   const target = groupTarget(order);
   if (!whale || !target) return;
-  try { await whale.sendText(target.id, text, { name: target.name, chatType: target.chatType }); } catch { /* 桥没起就算了 */ }
+  const voice = await resolveVoiceTarget(whale, target.id, target.name, target.chatType);
+  try {
+    await whale.sendText(target.id, text, { name: voice?.name || target.name, chatType: target.chatType });
+  } catch { /* 桥没起就算了 */ }
 }
 
 const SONG_EXTS = new Set(['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.opus', '.wma']);
@@ -436,6 +446,143 @@ function playlistParts(order) {
   return Math.abs(first / rate - order.durationSec) <= 0.02 ? parts : null;
 }
 
+const LONG_FORMAT = /^点歌格式\s+([a-f0-9]{8})\s+(WAV|语音)$/i;
+const registeredFormatOffers = new Set();
+
+function longTrack(order) {
+  return order.fullTrack === true && Number.isFinite(order.durationSec) && order.durationSec > 120;
+}
+
+async function canSendSongWave(whale) {
+  try { return (await whale.capabilities())?.singWave === true; }
+  catch { return false; }
+}
+
+async function canOfferSongFormats(whale) {
+  try { return (await whale.capabilities())?.singFormatChoice === true; }
+  catch { return false; }
+}
+
+async function waveReceipt(whale, id) {
+  if (!id) return 'uncertain';
+  try {
+    const receipt = await whale.delivery(id);
+    if (['queued', 'sending'].includes(receipt?.status)) return 'pending';
+    if (receipt?.confirmed === true && receipt?.status === 'confirmed') return 'sent';
+    return ['failed', 'cancelled'].includes(receipt?.status) ? 'failed' : 'uncertain';
+  } catch { return 'uncertain'; }
+}
+
+function longFormatPrompt(order) {
+  return '《' + order.song + '》唱好啦！你想要整首音频文件，还是我分 '
+    + order.audioParts.length + ' 条语音发给你？';
+}
+
+async function offerLongFormat(whale, order, state) {
+  if (!registeredFormatOffers.has(order.id)) {
+    try {
+      const result = await whale.send({ type: 'sing-format-offer', orderId: order.id });
+      if (result?.offered !== true) return;
+      registeredFormatOffers.add(order.id);
+    } catch { return; }
+  }
+  const selection = state.longFormats[order.id];
+  if (selection.announced) return;
+  selection.announced = true;
+  if (saveAuto(state)) await notifyGroup(whale, order, longFormatPrompt(order));
+}
+
+async function restoreFormatOffers(whale, settings, state) {
+  for (const [id, selection] of Object.entries(state.longFormats || {})) {
+    if (selection.status !== 'offered' || registeredFormatOffers.has(id) && selection.announced) continue;
+    const order = readRuntimeOrder(settings, id);
+    if (order?.status !== 'ready' || !playlistParts(order)) continue;
+    await offerLongFormat(whale, order, state);
+    break;
+  }
+}
+
+async function lookupNaturalFormat(whale, text) {
+  if (!/文件|wav|语音|分段|整首/i.test(text)
+    || !Object.values(loadAuto().longFormats || {}).some(selection => selection.status === 'offered')) return null;
+  try { return await whale.send({ type: 'sing-format-lookup' }); }
+  catch { return null; }
+}
+
+async function handleLongFormat(whale, message, settings, id, mode) {
+  const order = readRuntimeOrder(settings, id);
+  const state = loadAuto();
+  const existing = state.longFormats?.[id];
+  const chat = order && groupTarget(order);
+  if (!existing || order?.status !== 'ready' || !longTrack(order) || !chat
+    || chat.id !== message.chatId || chat.chatType !== message.chatType
+    || !message.senderId || order.wxid !== message.senderId) {
+    await reply(whale, message, '这条格式选择需要由点歌人在原会话里回复。');
+    return;
+  }
+  if (existing.status !== 'offered') {
+    await notifyGroup(whale, order, '这首歌已经选择过发送格式，请核对聊天里的发送结果。');
+    return;
+  }
+  if (mode === '语音') {
+    const target = await resolveVoiceTarget(whale, chat.id, chat.name, chat.chatType);
+    if (!target || !playlistParts(order)) {
+      await notifyGroup(whale, order, '语音暂时无法发送，可以重新选择 WAV。');
+      return;
+    }
+    const queued = enqueuePlaylist(settings, order, target, 'long-format-' + id);
+    if (!['new', 'existing'].includes(queued)) {
+      await notifyGroup(whale, order, '上一轮语音发送结果不确定，请先核对聊天。');
+      return;
+    }
+    state.longFormats[id] = { status: 'voice', at: existing.at };
+    saveAuto(state);
+    registeredFormatOffers.delete(id);
+    try { await whale.send({ type: 'sing-format-close', orderId: id }); } catch { /* 语音请求已入队 */ }
+    await notifyGroup(whale, order, '好，我分几条语音给你发过去。');
+    return;
+  }
+  if (!await canSendSongWave(whale)) {
+    await notifyGroup(whale, order, '附件通道暂时不可用，可以重新选择分段语音。');
+    return;
+  }
+  state.longFormats[id] = { status: 'wave', at: existing.at };
+  if (!saveAuto(state)) {
+    await notifyGroup(whale, order, '暂时写不了发送记录，WAV 没有排入队列。');
+    return;
+  }
+  try {
+    const delivery = await whale.send({ type: 'sing-wav', orderId: id });
+    state.longFormats[id].deliveryId = delivery?.id;
+    saveAuto(state);
+    registeredFormatOffers.delete(id);
+  } catch (error) {
+    if (/^host_sing_wave_|^host_invalid_sing_wave_/.test(String(error?.code || ''))) {
+      state.longFormats[id] = existing;
+      saveAuto(state);
+      await notifyGroup(whale, order, 'WAV 附件没有排入队列，可以重新选择分段语音。');
+    }
+  }
+}
+
+async function checkLongWaveReceipts(whale, settings, state) {
+  for (const [id, selection] of Object.entries(state.longFormats || {})) {
+    if (selection.status !== 'wave') continue;
+    const status = await waveReceipt(whale, selection.deliveryId);
+    if (status === 'pending') continue;
+    selection.status = status;
+    saveAuto(state);
+    const order = readRuntimeOrder(settings, id);
+    if (order) {
+      const notice = status === 'sent'
+        ? '《' + order.song + '》的整首音频给你发过去啦。'
+        : '《' + order.song + '》的文件我没能确认发过去，你先看看聊天里有没有收到。';
+      await notifyGroup(whale, order, notice);
+    }
+    break;
+  }
+}
+
 function playlistProgress(settings, order, target, request) {
   const parts = playlistParts(order);
   if (!parts) return { status: 'failed', completed: 0, total: 0 };
@@ -521,11 +668,11 @@ async function processManualPlaylists(whale, settings) {
 }
 
 
-async function deliverReady(settings, order, state) {
+async function deliverReady(whale, settings, order, state) {
   const chat = groupTarget(order);
-  const target = chat && voiceTarget(chat.id, chat.name, chat.chatType);
-  if (!target) return 'failed';
   if (state.sent?.[order.id]) return 'already-sent';
+  const target = chat && await resolveVoiceTarget(whale, chat.id, chat.name, chat.chatType);
+  if (!target) return 'failed';
   if (order.fullTrack) return (await advancePlaylist(settings, order, target, 'auto')).status;
 
   const file = deliveryFile(settings, order.id, target);
@@ -541,6 +688,7 @@ async function deliverReady(settings, order, state) {
 const PROACTIVE_VIA = 'breezeblue-proactive';
 const PROACTIVE_STATE = path.join(__dirname, 'proactive-state.json');
 const PROACTIVE_TTL = 200 * 60 * 1000;
+const workerStartedAt = Date.now();
 
 function readProactive() {
   try {
@@ -590,6 +738,29 @@ function contactsMatchBridge(contacts, bridge) {
     && (contacts.account === bridge.accountWxid || contacts.account === bridge.account));
 }
 
+async function resolveVoiceTarget(whale, id, name, chatType) {
+  const target = voiceTarget(id, name, chatType);
+  if (target) return target;
+  if (!id || id === 'filehelper' || !['private', 'group'].includes(chatType)) return null;
+  try {
+    // 消息钩子可能没有会话名。只从当前已核验账号的通讯录按会话 ID 补齐。
+    const status = (await whale.api('/api/status'))?.body;
+    const bridge = status?.gateways?.find(item => item.platform === 'wechat')?.bridge;
+    if (!bridge?.online || !bridge.uia || bridge.accountGuard !== true || bridge.accountOk !== true
+      || id === bridge.accountWxid || id === bridge.account) return null;
+    const contacts = (await whale.api('/api/wechat/contacts'))?.body;
+    if (!contactsMatchBridge(contacts, bridge)) return null;
+    const matches = contacts.items.filter(item => item.wxid === id && item.isGroup === (chatType === 'group'));
+    if (matches.length !== 1) return null;
+    const title = String(matches[0].remark || matches[0].name || '').trim();
+    if (contacts.items.some(item => item.wxid !== id
+      && [item.name, item.remark, item.label].some(label => relayName(label) === relayName(title)))) return null;
+    return voiceTarget(id, title, chatType);
+  } catch {
+    return null;
+  }
+}
+
 async function proactiveContext(whale, settings, now) {
   if (process.permission?.has('ChildProcess') === false) return null;
   const status = (await whale.api('/api/status'))?.body;
@@ -598,7 +769,9 @@ async function proactiveContext(whale, settings, now) {
   const last = Number(gateway?.lastMessageAt);
   const idleMs = Math.max(5, Number(settings.proactiveIdleMinutes ?? 120)) * 60000;
   if (!bridge?.online || !bridge.uia || bridge.accountGuard !== true || bridge.accountOk !== true
-    || !bridge.account || !Number.isFinite(last) || last <= 0 || !(now - last >= idleMs)) return null;
+    || !bridge.account || !Number.isFinite(last)) return null;
+  // 刚启动且尚未收过消息时，从插件启动开始计空闲时间。
+  if (now - (last > 0 ? last : workerStartedAt) < idleMs) return null;
   const plugins = (await whale.api('/api/plugins/status'))?.body?.items;
   if (!Array.isArray(plugins) || plugins.some(item => item.id === 'breeze-proactive')) return null;
   const master = (await whale.api('/api/config'))?.body?.config?.persona?.master;
@@ -678,6 +851,76 @@ function finishProactive(state) {
   saveProactive(state);
 }
 
+async function pickLikedSong(settings, state) {
+  const tools = path.dirname(cliPath(settings));
+  const fetcher = path.join(tools, 'fetch_song.py');
+  if (!fs.existsSync(fetcher)) return null;
+  const root = runtimeRoot(settings);
+  const python = settings.python || path.join(root, 'engine', 'venv', 'Scripts', 'python.exe');
+  const cookies = settings.neteaseCookies || path.join(root, 'cookies.txt');
+  if (!fs.existsSync(cookies)) return null;
+  const cache = path.join(root, 'cache');
+  try { fs.mkdirSync(cache, { recursive: true }); } catch { /* ignore */ }
+  const seen = (state && state.songs) || {};
+  const deadline = Date.now() + 75000;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const remaining = deadline - Date.now();
+    if (remaining < 1000) break;
+    const out = path.resolve(cache, 'liked-' + crypto.randomUUID() + '.mp3');
+    const data = await new Promise(resolve => {
+      execFile(python, [fetcher, '--liked', '--pick', 'random', '--out', out], {
+        timeout: Math.min(45000, remaining), maxBuffer: 2 * 1024 * 1024, windowsHide: true,
+        env: { ...process.env, BREEZE_COOKIES: cookies, PYTHONIOENCODING: 'utf-8' },
+      }, (error, stdout) => {
+        if (error) { resolve(null); return; }
+        const line = String(stdout || '').trim().split('\n').filter(Boolean).pop() || '';
+        try { resolve(JSON.parse(line)); } catch { resolve({ ok: false }); }
+      });
+    });
+    if (!data?.ok || !data.path || path.resolve(String(data.path)) !== out || !fs.existsSync(out)) {
+      try { fs.unlinkSync(out); } catch { /* 本轮没有留下下载文件 */ }
+      continue;
+    }
+    const title = String(data.title || '').trim();
+    const key = normName(title);
+    if (!key || Object.hasOwn(seen, key)) {
+      try { fs.unlinkSync(out); } catch { /* 本轮缓存已不存在 */ }
+      continue;
+    }
+    return { name: title.slice(0, 100), artist: String(data.artist || '').trim(), file: out };
+  }
+  return null;
+}
+
+async function handleLikedOrder(whale, message, settings) {
+  const target = await voiceTargetForMessage(whale, message);
+  if (!target) {
+    await reply(whale, message, '我没能确认会话标题，先不发。');
+    return;
+  }
+  const liked = await pickLikedSong(settings, readProactive());
+  if (!liked) {
+    await reply(whale, message, '这次没能从网易云「我喜欢的音乐」拿到可用的歌，等会儿再试吧。');
+    return;
+  }
+  const songsDir = path.join(dataRoot(settings), 'songs');
+  try { fs.mkdirSync(songsDir, { recursive: true }); } catch { /* ignore */ }
+  const safeName = liked.name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'liked';
+  const localFile = path.join(songsDir, safeName + '.mp3');
+  try { fs.copyFileSync(liked.file, localFile, fs.constants.COPYFILE_EXCL); } catch { /* 保留用户已有音源 */ }
+  const out = await runCover(settings, ['order', '--song', liked.name, '--artist', liked.artist,
+    '--requester', nameFor(message), '--via', message.chatType === 'group' ? 'group' : 'private',
+    '--chat-type', message.chatType === 'group' ? 'group' : 'private',
+    '--engine', settings.engine || 'seedvc', '--group-id', chatFor(message),
+    '--group-name', target.name, '--wxid', String(message.senderId || '')], 15000);
+  if (!out?.ok || !out.order?.id) {
+    await reply(whale, message, '这首歌没排上，等会儿再试吧。');
+    return;
+  }
+  const where = target.chatType === 'group' ? '发到群里' : '发给你';
+  await reply(whale, message, `收到～从「我喜欢的音乐」随机挑到《${liked.name}》，排第 ${out.position || 1} 位，做好${where}。`);
+}
+
 async function proactiveTick(whale, settings, orders, allowStart) {
   const state = readProactive();
   if (!state) return false;
@@ -691,10 +934,11 @@ async function proactiveTick(whale, settings, orders, allowStart) {
     if (job.phase === 'sending') {
       // 旧状态里的单条发送可能已提交。保留它的回执，绝不从第一段重新发送。
       const activeTarget = voiceTarget(job.targetId, job.targetName, type);
-      const progress = job.receipt ? { status: deliveryStatus(job.receipt) }
+      const progress = job.waveMode ? { status: await waveReceipt(whale, job.waveDeliveryId) }
+        : job.receipt ? { status: deliveryStatus(job.receipt) }
         : matchesOrder && activeTarget ? playlistProgress(settings, order, activeTarget, 'proactive') : { status: 'failed' };
       if (progress.status === 'pending') return true;
-      if (progress.status === 'new' && !job.receipt && settings.proactiveEnabled === true) {
+      if (progress.status === 'new' && !job.waveMode && !job.receipt && settings.proactiveEnabled === true) {
         if (!allowStart) return false;
         const target = (await proactiveContext(whale, settings, now))?.find(item =>
           item.id === job.targetId && item.name === job.targetName && item.chatType === type);
@@ -737,10 +981,17 @@ async function proactiveTick(whale, settings, orders, allowStart) {
     state.lastAt = now;
     state.cursor = ((Number(state.cursor) || 0) + 1) % targets.length;
     state.songs = { ...state.songs, [key]: now };
-    state.active = { ...job, phase: 'sending', chatType: type, targetName: target.name, startedAt: now };
+    const waveMode = longTrack(order) && await canSendSongWave(whale);
+    state.active = { ...job, phase: 'sending', chatType: type, targetName: target.name, startedAt: now, waveMode };
     saveProactive(state);
     if (settings.proactiveDryRun === true) {
       finishProactive(state);
+    } else if (waveMode) {
+      try {
+        const delivery = await whale.send({ type: 'sing-wav', orderId: order.id });
+        state.active.waveDeliveryId = delivery?.id;
+        saveProactive(state);
+      } catch { finishProactive(state); }
     } else {
       const delivery = await advancePlaylist(settings, order, target, 'proactive');
       if (['failed', 'uncertain'].includes(delivery.status)) finishProactive(state);
@@ -756,13 +1007,30 @@ async function proactiveTick(whale, settings, orders, allowStart) {
   const targets = await proactiveContext(whale, settings, now);
   if (!targets) return false;
   const target = targets[(Number(state.cursor) || 0) % targets.length];
+  if (settings.proactiveLiked === true) {
+    const liked = await pickLikedSong(settings, state);
+    if (liked) {
+      const result = await runCover(settings, ['order', '--song', liked.name, '--artist', liked.artist,
+        '--requester', '鲸鲸', '--via', PROACTIVE_VIA, '--chat-type', target.chatType,
+        '--engine', 'seedvc', '--group-id', target.id, '--group-name', target.name], 5000);
+      if (result?.ok && /^[0-9a-f]{8}$/i.test(String(result.order?.id || ''))) {
+        state.active = { orderId: result.order.id, targetId: target.id, chatType: target.chatType,
+          song: liked.name, startedAt: now };
+        saveProactive(state);
+        startPrep(settings, result.order, liked);
+        return true;
+      }
+    }
+  }
   if (!rememberPlayedSongs(whale, state, orders)) return false;
   const library = proactiveLibrary(settings, state);
   const candidates = library.filter(item => item.file);
   const preferred = candidates.length ? candidates : library;
   const allowed = new Set(preferred.map(item => normName(item.name)));
+  const formats = loadAuto().longFormats;
   const reusable = orders.filter(order => order.status === 'ready' && order.audio
     && order.chatType === target.chatType && order.group?.id === target.id && order.fullTrack === true
+    && !['offered', 'wave', 'uncertain'].includes(formats?.[order.id]?.status)
     && playlistParts(order) && allowed.has(normName(order.song)))
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
   if (reusable) {
@@ -786,6 +1054,8 @@ async function proactiveTick(whale, settings, orders, allowStart) {
 async function autoTick(whale, settings) {
   if (!whale || settings.autoRender === false) return;
   const state = loadAuto();
+  await restoreFormatOffers(whale, settings, state);
+  await checkLongWaveReceipts(whale, settings, state);
   const out = await runCover(settings, ['list', '--status', 'pending,making,ready', '--limit', '100', '--active-first'], 10000);
   if (!out || !out.ok) return;
   const list = Array.isArray(out.orders) ? out.orders : [];
@@ -818,7 +1088,8 @@ async function autoTick(whale, settings) {
 
   // 内核/插件重启后 state.active 可能丢了；已经 ready 但没发过的单要补发。
   if (!active) {
-    const unsent = ours.find((o) => o.status === 'ready' && !state.sent?.[o.id] && !state.voiceStopped?.[o.id]);
+    const unsent = ours.find((o) => o.status === 'ready' && !state.sent?.[o.id]
+      && !state.voiceStopped?.[o.id] && !state.longFormats?.[o.id]);
     if (unsent) {
       state.active = { id: unsent.id, startedAt: Date.now(), recovered: true };
       saveAuto(state);
@@ -827,7 +1098,22 @@ async function autoTick(whale, settings) {
   }
 
   if (active && active.status === 'ready') {
-    const delivery = await deliverReady(settings, active, state);
+    const parts = playlistParts(active);
+    const chat = groupTarget(active);
+    if (parts && longTrack(active) && chat && active.wxid && !state.sent?.[active.id]
+      && ['group', 'private'].includes(active.via) && /^[0-9a-f]{8}$/.test(active.id)) {
+      const progress = playlistProgress(settings, active, chat, 'auto');
+      if (progress.status === 'new' && progress.completed === 0 && await canOfferSongFormats(whale)) {
+        state.longFormats = { ...state.longFormats, [active.id]: { status: 'offered', at: Date.now() } };
+        state.active = null;
+        state.attempts = {};
+        state.progressStartedAt = null;
+        state.lastProgressAt = null;
+        if (saveAuto(state)) await offerLongFormat(whale, active, state);
+        return;
+      }
+    }
+    const delivery = await deliverReady(whale, settings, active, state);
     if (delivery === 'pending') return;
 
     state.active = null;
@@ -846,7 +1132,7 @@ async function autoTick(whale, settings) {
       await notifyGroup(whale, active, `唱好了～《${active.song}》`);
     } else if (delivery !== 'already-sent' && active.fullTrack) {
       const chat = groupTarget(active);
-      const target = chat && voiceTarget(chat.id, chat.name, chat.chatType);
+      const target = chat && await resolveVoiceTarget(whale, chat.id, chat.name, chat.chatType);
       const completed = target ? playlistProgress(settings, active, target, 'auto').completed : 0;
       await notifyGroup(whale, active, '《' + active.song + '》的后续语音已停止，已确认 ' + completed
         + ' 条。请先核对聊天里的语音条。');
@@ -1033,6 +1319,16 @@ function chatFor(message) {
   return isGroup ? message.chatId : (message.senderId || message.chatId);
 }
 
+function voiceTargetForMessage(whale, message) {
+  const id = chatFor(message);
+  const type = message.chatType === 'group' ? 'group' : 'private';
+  const title = type === 'group' ? message.chatTitle : (message.chatTitle || message.senderName);
+  const direct = voiceTarget(id, title, type);
+  if (direct) return direct;
+  if (type === 'private' && message.chatId && message.chatId !== id) return null;
+  return resolveVoiceTarget(whale, id, '', type);
+}
+
 async function reply(whale, message, text) {
   try {
     await whale.sendText(chatFor(message), text, {
@@ -1065,8 +1361,8 @@ async function handleOrder(whale, message, settings, parsed) {
     '--engine', settings.engine || 'seedvc',
     '--group-id', chatFor(message),
   ];
-  const title = message.chatType === 'group' ? message.chatTitle : (message.chatTitle || message.senderName);
-  if (title) args.push('--group-name', String(title));
+  const target = await voiceTargetForMessage(whale, message);
+  if (target) args.push('--group-name', target.name);
   if (parsed.artist) args.push('--artist', parsed.artist);
   if (parsed.note) args.push('--note', parsed.note);
   if (message.senderId) args.push('--wxid', String(message.senderId));
@@ -1227,14 +1523,21 @@ async function handleSing(whale, message, settings, wanted) {
     return;
   }
 
-  const type = message.chatType === 'group' ? 'group' : 'private';
-  const title = type === 'group' ? message.chatTitle : (message.chatTitle || message.senderName);
-  const chat = voiceTarget(chatFor(message), title, type);
+  const chat = await voiceTargetForMessage(whale, message);
   if (!chat) {
     await reply(whale, message, '我没能确认微信会话标题，先不发。');
     return;
   }
   if (target.fullTrack) {
+    const format = loadAuto().longFormats?.[target.id];
+    if (format?.status === 'offered') {
+      await reply(whale, message, longFormatPrompt(target));
+      return;
+    }
+    if (['wave', 'uncertain'].includes(format?.status)) {
+      await reply(whale, message, '整首 WAV 正在发送或等待回执，请先核对聊天。');
+      return;
+    }
     if (!playlistParts(target)) {
       await reply(whale, message, '整首分段资料不完整，请重新点歌。');
       return;
@@ -1293,15 +1596,46 @@ function relayText(value) {
     .replace(/^[《「“"'〈\s]+|[》」”"'〉\s]+$/g, '').trim();
 }
 
+const RELAY_LAST = '__relay_last_song__';
+const RELAY_CONFIRM_WORDS = new Set(['发', '发吧', '发。', '好', '好叻', '好的', '可以', '唱吧', '确认', '嗯', '冲', '来吧']);
+const RELAY_CANCEL_WORDS = new Set(['算了', '取消', '不发', '不用', '别唱', '不要', '先不', '不唱']);
+
 function parseSongRelay(text) {
-  const command = String(text || '').trim();
-  const action = /^(唱歌确认|唱歌取消)\s+([A-Fa-f0-9]{6})$/.exec(command);
+  const command = String(text || '').normalize('NFKC').trim()
+    .replace(/[。！!？?，,]+$/g, '').trim();
+  if (!command) return null;
+  const action = /^(唱歌确认|唱歌取消)\s*([A-Fa-f0-9]{6})$/.exec(command);
   if (action) return { type: action[1], code: action[2].toLowerCase() };
-  const give = /^(?:帮我|请)?\s*把《([^》]{1,100})》唱给(.{1,60}?)听[。！!？?]?$/.exec(command);
-  const sing = /^(?:帮我|请)?\s*(?:给|去|到|在)\s*(.{1,60}?)\s*唱(?:首|一首)?\s*(.{1,100}?)[。！!？?]?$/.exec(command);
-  const target = relayText(give?.[2] || sing?.[1]);
-  const song = relayText(give?.[1] || sing?.[2]);
-  return target && song ? { type: 'request', target, song } : null;
+  if (RELAY_CONFIRM_WORDS.has(command)) return { type: '确认' };
+  if (RELAY_CANCEL_WORDS.has(command)) return { type: '取消' };
+
+  let target = '';
+  let song = '';
+  // 把刚刚/刚才/上一/那首 唱给某人听
+  const last = /^(?:帮我|请)?\s*把\s*(?:刚刚|刚才|上一|上上)?\s*那?\s*(?:首|一首)?\s*(?:歌|歌曲)?\s*(?:唱|放)\s*给\s*(.{1,60}?)\s*(?:听|吧|呗)?$/.exec(command);
+  if (last) { target = relayText(last[1]); song = RELAY_LAST; }
+  // 把《歌名》唱给某人听
+  if (!target) {
+    const give = /^(?:帮我|请)?\s*把\s*《([^》]{1,100})》\s*唱给\s*(.{1,60}?)\s*(?:听|吧|呗)?$/.exec(command);
+    if (give) { song = relayText(give[1]); target = relayText(give[2]); }
+  }
+  // 唱《歌名》给某人听 / 唱歌名给某人
+  if (!target) {
+    const sing = /^(?:帮我|请)?\s*唱\s*(?:首|一首)?\s*《?([^》]{1,100}?)》?\s*(?:给|送给)\s*(.{1,60}?)\s*(?:听|吧|呗)?$/.exec(command);
+    if (sing) { song = relayText(sing[1]); target = relayText(sing[2]); }
+  }
+  // 给某人唱《歌名》、去某群唱《歌名》
+  if (!target) {
+    const to = /^(?:帮我|请)?\s*(?:给|替|帮|去|到|在)\s*(.{1,60}?)\s*唱\s*(?:首|一首)?\s*《?([^》]{1,100}?)》?$/u.exec(command);
+    if (to) { target = relayText(to[1]); song = relayText(to[2]); }
+  }
+  // 唱/放 一首给某人听
+  if (!target) {
+    const just = /^(?:帮我|请)?\s*(?:唱|放)\s*(?:一?\s*首?)\s*给\s*(.{1,60}?)\s*(?:听|吧|呗)?$/.exec(command);
+    if (just) { target = relayText(just[1]); song = RELAY_LAST; }
+  }
+  if (!target || !song) return null;
+  return { type: 'request', target, song };
 }
 
 function relayPartyId(value) {
@@ -1366,62 +1700,172 @@ function saveRelay(file, job) {
   }
 }
 
+function canReuseRelayOrder(settings, order, owner, privateChatId) {
+  if (!order || !/^[0-9a-f]{8}$/i.test(order.id) || order.engine !== 'seedvc'
+    || !['ready', 'delivered'].includes(order.status) || order.via !== 'private'
+    || order.chatType !== 'private' || order.group?.id !== privateChatId || order.wxid !== owner) return false;
+  const parts = playlistParts(order);
+  if (!parts || !order.audio) return false;
+  try {
+    const root = fs.realpathSync(dataRoot(settings));
+    const work = path.join(root, 'work', order.id);
+    if (fs.realpathSync(work) !== work) return false;
+    return [order.audio, ...parts.map(part => part.audio)].every(file => {
+      const resolved = fs.realpathSync(path.resolve(root, file));
+      const relative = path.relative(work, resolved);
+      return relative && !path.isAbsolute(relative) && relative !== '..'
+        && !relative.startsWith('..' + path.sep) && /[.]wav$/i.test(relative) && fs.statSync(resolved).isFile();
+    });
+  } catch { return false; }
+}
+
+async function resolveRelayLastSong(settings, owner, privateChatId) {
+  try {
+    const out = await runCover(settings, ['list', '--status', 'ready,delivered', '--newest', '--limit', '200'], 5000);
+    const orders = Array.isArray(out?.orders) ? out.orders : [];
+    return orders.find(order => canReuseRelayOrder(settings, order, owner, privateChatId)) || null;
+  } catch { return null; }
+}
+
+async function relayOwnerTitle(whale, owner) {
+  try {
+    const config = (await whale.api('/api/config'))?.body?.config;
+    const titles = config?.persona?.master?.titles || {};
+    return String(titles[owner] || '').trim();
+  } catch {
+    return '';
+  }
+}
+
 async function handleSongRelay(whale, message, settings, intent) {
   if (settings.relaySingEnabled !== true || message.platform !== 'wechat' || message.chatType !== 'private') return false;
   const owner = String(message.senderId || '').trim();
-  const from = voiceTarget(owner, message.chatTitle || message.senderName, 'private');
-  if (!from || !message.chatId || message.chatId === '-') return false;
+  if (!owner || !message.chatId || message.chatId === '-') return false;
+  const from = await voiceTargetForMessage(whale, message);
+  if (!from) return false;
   const file = relayPath(owner);
   if (relayBusy.has(file)) return true;
   relayBusy.add(file);
   try {
     const existing = readRelay(file);
+    const confirmWord = intent.type === '确认';
+    const cancelWord = intent.type === '取消';
+    const confirmCode = intent.type === '唱歌确认';
+    const cancelCode = intent.type === '唱歌取消';
+
     if (intent.type === 'request') {
       const target = await relayContext(whale, settings, owner, intent.target);
       if (!target) {
-        await reply(whale, message, '发起人、账号或目标白名单未通过核验，代发没有建单。');
+        await reply(whale, message, '我没确认到这个目标或账号，先不发。可以说“唱《歌名》给谁听”。');
         return true;
+      }
+      let song = intent.song;
+      let sourceOrderId = '';
+      if (song === RELAY_LAST) {
+        const last = await resolveRelayLastSong(settings, owner, from.id);
+        if (!last?.song) {
+          await reply(whale, message, '这个私聊里还没有你点过的整首成品。你告诉我歌名，我重新唱一遍吧。');
+          return true;
+        }
+        song = last.song;
+        sourceOrderId = last.id;
       }
       if (existing?.sourceMessage && message.msgId === existing.sourceMessage) return true;
       if (['confirmed', 'allocating', 'rendering', 'sending'].includes(existing?.state)) {
-        await reply(whale, message, '你还有一首已确认的代发在处理，暂未创建新单。');
+        await reply(whale, message, '上一次代发还在准备，等它唱完再来吧。');
         return true;
       }
       const code = crypto.randomBytes(3).toString('hex');
-      saveRelay(file, { state: 'draft', code, owner, from, target, targetWord: intent.target,
-        song: intent.song, originChat: message.chatId, sourceMessage: message.msgId, expires: Date.now() + RELAY_TTL });
-      await reply(whale, message, '待确认：给「' + target.name + '」唱《' + intent.song + '》。10 分钟内回「唱歌确认 '
-        + code + '」，取消回「唱歌取消 ' + code + '」。');
+      const ownerTitle = await relayOwnerTitle(whale, owner);
+      saveRelay(file, { state: 'draft', code, owner, ownerTitle, from, target, targetWord: intent.target,
+        song, sourceOrderId, originChat: message.chatId, sourceMessage: message.msgId, expires: Date.now() + RELAY_TTL });
+      const where = target.chatType === 'group'
+        ? `唱到「${target.name}」里`
+        : `唱给${intent.target}听`;
+      await reply(whale, message, `要我把《${song}》${where}吗？回「发」我就去，回「算了」就取消。`);
       return true;
     }
-    if (!existing || existing.code !== intent.code || existing.originChat !== message.chatId
-      || existing.owner !== owner || existing.state !== 'draft' || Date.now() >= existing.expires) {
-      await reply(whale, message, '没有与这次确认匹配的待发歌曲。');
+
+    // 自然确认词：没有待发草稿时不要拦截普通聊天。
+    if ((confirmWord || cancelWord) && !existing) return false;
+    if (!existing || existing.originChat !== message.chatId
+      || existing.owner !== owner || !['draft', 'stopped'].includes(existing.state)
+      || (confirmCode || cancelCode) && existing.code !== String(intent.code || '')) {
+      await reply(whale, message, '这条待发歌曲我找不到了，重新跟我说一次吧。');
       return true;
     }
-    if (intent.type === '唱歌取消') {
+    if (Date.now() >= existing.expires) {
+      await reply(whale, message, '这单等太久了，已经失效；重新跟我说一次吧。');
+      return true;
+    }
+    if (existing.state === 'stopped') {
+      await reply(whale, message, '这单已经停掉了，重新跟我说一次吧。');
+      return true;
+    }
+    if (cancelWord || cancelCode) {
       saveRelay(file, { ...existing, state: 'stopped' });
-      await reply(whale, message, '已取消代发唱歌。');
+      await reply(whale, message, '好，那这次不唱了。');
       return true;
     }
     if (!(await relayContext(whale, settings, owner, existing.targetWord, existing.target))) {
       saveRelay(file, { ...existing, state: 'stopped' });
-      await reply(whale, message, '当前账号或目标核验已变化，请重新发起。');
+      await reply(whale, message, '目标或账号刚变了，先不发了；重新跟我说一次吧。');
       return true;
     }
     saveRelay(file, { ...existing, state: 'confirmed', startedAt: Date.now() });
-    await reply(whale, message, '已确认，开始准备整首；每一段投递前都会重新核验目标。');
+    const where = existing.target.chatType === 'group'
+      ? `去「${existing.target.name}」里唱`
+      : `去给${existing.targetWord}唱`;
+    await reply(whale, message, `好叻，这就${where}。`);
     return true;
   } finally {
     relayBusy.delete(file);
   }
 }
 
+function relayTargetText(job) {
+  const target = job && job.target;
+  if (!target) return '';
+  const ownerTitle = String(job.ownerTitle || '').trim();
+  const who = String(job.targetWord || target.name || '').trim();
+  const prefix = ownerTitle ? ownerTitle + '叫我' : '有人叫我';
+  return target.chatType === 'group'
+    ? `${prefix}唱《${job.song}》给大家听，我唱得怎么样？`
+    : `${prefix}唱《${job.song}》给你听，${who}，我唱得你觉得好听吗？`;
+}
 async function finishSongRelay(whale, file, job, status, completed) {
   saveRelay(file, { ...job, state: status });
-  const result = status === 'sent' ? '《' + job.song + '》代发完毕。'
-    : '《' + job.song + '》代发已停止，已确认 ' + completed + ' 条。请先核对目标会话。';
-  if (status === 'sent') await whale.sendText(job.from.id, result, { name: job.from.name, chatType: 'private' });
+  const target = job.target;
+  if (status === 'sent') {
+    const who = String(job.targetWord || target?.name || '').trim();
+    const text = relayTargetText(job);
+    try { await whale.sendText(target.id, text, { name: target.name, chatType: target.chatType }); }
+    catch { /* 语音已发，留言失败不重发语音 */ }
+    const done = target.chatType === 'group'
+      ? `已经在「${target.name}」里唱完啦～`
+      : `已经在${who}那边唱完啦～`;
+    await whale.sendText(job.from.id, done, { name: job.from.name, chatType: 'private' });
+  } else {
+    await whale.sendText(job.from.id,
+      `这次没唱成，已确认 ${completed} 条。你核对一下目标会话吧。`,
+      { name: job.from.name, chatType: 'private' });
+  }
+}
+
+function matchesRelaySource(settings, order, job) {
+  return canReuseRelayOrder(settings, order, job.owner, job.from?.id)
+    && normName(order.song) === normName(job.song)
+    && (!job.sourceOrderId || job.sourceOrderId === order.id);
+}
+
+async function findRelayReusable(settings, job) {
+  if (job.sourceOrderId) {
+    const order = readRuntimeOrder(settings, job.sourceOrderId);
+    return matchesRelaySource(settings, order, job) ? order : null;
+  }
+  const out = await runCover(settings, ['list', '--status', 'ready,delivered', '--newest', '--limit', '200'], 5000);
+  const orders = Array.isArray(out?.orders) ? out.orders : [];
+  return orders.find(order => matchesRelaySource(settings, order, job)) || null;
 }
 
 async function processSongRelays(whale, settings) {
@@ -1445,6 +1889,15 @@ async function processSongRelays(whale, settings) {
           await finishSongRelay(whale, file, job, 'stopped', 0);
           return true;
         }
+        const reusable = await findRelayReusable(settings, job);
+        if (reusable) {
+          saveRelay(file, { ...job, state: 'sending', orderId: reusable.id, reuse: true, startedAt: job.startedAt || Date.now() });
+          return true;
+        }
+        if (job.sourceOrderId) {
+          await finishSongRelay(whale, file, job, 'stopped', 0);
+          return true;
+        }
         saveRelay(file, { ...job, state: 'allocating' });
         const result = await runCover(settings, ['order', '--song', job.song, '--requester', '代发唱歌',
           '--via', RELAY_SONG_VIA, '--chat-type', job.target.chatType, '--group-id', job.target.id,
@@ -1459,10 +1912,12 @@ async function processSongRelays(whale, settings) {
         return true;
       }
       const order = readRuntimeOrder(settings, job.orderId);
-      const match = order?.via === RELAY_SONG_VIA && order.group?.id === job.target.id;
+      const match = Boolean(order) && (job.reuse === true
+        ? matchesRelaySource(settings, order, job)
+        : order.via === RELAY_SONG_VIA && order.group?.id === job.target.id);
       if (match && ['pending', 'making'].includes(order.status)
         && Date.now() - job.startedAt < 205 * 60 * 1000 && prepStatus(settings, order.id)?.status !== 'error') return true;
-      if (!match || order.status !== 'ready' || !order.fullTrack || !playlistParts(order)) {
+      if (!match || !['ready', 'delivered'].includes(order.status) || !order.fullTrack || !playlistParts(order)) {
         await finishSongRelay(whale, file, job, 'stopped', 0);
         return true;
       }
@@ -1491,14 +1946,39 @@ let timerRunning = false;
 
 module.exports = {
   parseOrder,
+  parseSongRelay,
+  pickLikedSong,
+  relayTargetText,
   hooks: {
     async 'chat.pre_reply'(input) {
       const whale = input.whale;
       const message = input.message || {};
       const settings = input.settings || {};
       if (!whale || !message.text || (message.platform && message.platform !== 'wechat')) return { action: 'pass' };
+      const choiceText = cleanText(message.text).normalize('NFKC');
+      const format = LONG_FORMAT.exec(choiceText);
+      if (format) {
+        await handleLongFormat(whale, message, settings, format[1].toLowerCase(), format[2].toUpperCase());
+        return { action: 'skip' };
+      }
+      const choice = await lookupNaturalFormat(whale, choiceText);
+      if (choice?.orderId && ['WAV', '语音'].includes(choice.mode)) {
+        await handleLongFormat(whale, message, settings, choice.orderId, choice.mode);
+        return { action: 'skip' };
+      }
+      if (Array.isArray(choice?.choices) && choice.choices.length) {
+        const titles = choice.choices.map(song => '《' + song + '》');
+        const songs = titles.length > 1 ? titles.slice(0, -1).join('、') + '和' + titles.at(-1) : titles[0];
+        await reply(whale, message, songs + '都唱好啦。你想先发哪首？比如「'
+          + titles[0] + (choice.mode === 'WAV' ? '发文件吧' : '发语音吧') + '」。');
+        return { action: 'skip' };
+      }
       const relay = parseSongRelay(cleanText(message.text));
       if (relay && await handleSongRelay(whale, message, settings, relay)) return { action: 'skip' };
+      if (LIKED_ORDER.test(cleanText(message.text)) && (settings.onlyGroup !== true || message.chatType === 'group')) {
+        await handleLikedOrder(whale, message, settings);
+        return { action: 'skip' };
+      }
       if (settings.onlyGroup === true && message.chatType !== 'group') {
         // 群聊限定时保留私聊播放已经生成的成品。
         const privateSing = SING_RE.exec(cleanText(message.text));
