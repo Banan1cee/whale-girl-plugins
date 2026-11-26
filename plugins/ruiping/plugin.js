@@ -1,26 +1,29 @@
 'use strict';
-
 /**
- * 锐评插件 · 鲸鲸 4.1.6 / JavaScript 插件 Api 4
+ * 锐评（ruiping）· whale-plugin/1 / 4 级 node-full
  *
- * 做一件事：先联网搜事实，再用一句金句或暴论锐评真实事件/结果。
+ * 旧 Api 4 的 chat.search / chat.pre_reply / chat.generate / tool.run 迁移：
+ *   - chat.search@1 (replace)：命中关键词时检索并返回 {text,items,status}
+ *   - chat.pre_reply@1 (gate)：wake=true 且命中时返回 wake，否则 pass
+ *   - chat.generate@1 (replace)：复用本轮搜索缓存或重新检索，生成固定格式锐评
+ *   - tool.run@1：卡片手动运行，返回完整 JSON 诊断
  *
- * 搜索 API（4.1.6 起，设置 → API 接入 → 搜索）开通后自动生效：
- *   - 宿主先走 DeepSeek / 知乎搜索，失败或无结果再回退本地 Bing / 360；
- *   - 插件读回 provider / attempts / dateFilter，在证据与来源里标注渠道；
- *   - 知乎是问答观点，不当事实；API 失败回退本地时会在 notes 里说明。
+ * 宿主的 search.query@1 / model.complete@1 通过 context.host.call 调用；
+ * 插件不联网、不监听端口、不调用 /api/*。
+ * 新协议没有 provider/attempts/dateFilter/thinking，相关展示/参数已删；
+ * replace 是独占模式，与其它 chat.search/chat.generate 插件互斥。
  *
- * 入口：
- *   - chat.search   命中「锐评」时，用整理过的关键词检索，把证据交给本轮提示词
- *   - chat.generate 用同一份证据生成固定格式的锐评（不再走宿主人设的自由发挥）
- *   - chat.pre_reply 可选：群里没被点名也接话（设置 wake=true，默认关）
- *   - tool.run      插件卡片「设置 → 运行一次」，输入事件即可拿到完整 JSON 结果
- *
- * 不主动发消息、不写聊天记录、不访问宿主私有接口；所有配置都在卡片 settings 里。
- * 事实核对是确定性的：锐评里出现的数字必须能在检索资料里找到，否则这条事实会被删掉。
+ * 搜索上下文为什么要落文件：chat.search@1 与 chat.generate@1 是两次独立 invocation，
+ * 4 级 worker 每次调用都是新进程，模块级 Map 跨不过去；chat.generate.input 的 turns
+ * 只是聊天历史，宿主把搜索结果拼成散文塞进最后一条 user 消息，已经拿不回 items。
+ * 因此同一轮用 worker 私有 cwd 的文件缓存（键=chatType+chatId+text，可选 senderId/msgId
+ * 同时存在时再校验），3 分钟 TTL、最多 16 条、取一次即删。
  */
 
-const VERSION = '1.1.0';
+const fs = require('node:fs');
+const path = require('node:path');
+
+const VERSION = '2.0.2';
 const MAX_TOPIC = 200;
 const MAX_CHAT_TEXT = 1200;
 
@@ -83,7 +86,9 @@ function text(value, max) {
 
 function normalizeSettings(settings) {
   const raw = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
-  const keywords = (Array.isArray(raw.keywords) ? raw.keywords : DEFAULTS.keywords)
+  const keywordSource = Array.isArray(raw.keywords) ? raw.keywords
+    : typeof raw.keywords === 'string' ? raw.keywords.split(/[,，\s]+/) : DEFAULTS.keywords;
+  const keywords = keywordSource
     .filter(word => typeof word === 'string' && word.trim())
     .map(word => word.trim().slice(0, 12))
     .slice(0, 8);
@@ -503,15 +508,15 @@ function buildPrompt(request, config, evidence) {
   return { system, user };
 }
 
-async function gather(whale, request, config) {
-  if (!whale || typeof whale.search !== 'function') {
+async function gather(sdk, request, config) {
+  if (!sdk || typeof sdk.search !== 'function') {
     return { status: 'failed', reason: 'search_unavailable', items: [], text: '' };
   }
   const options = { timeoutMs: config.searchTimeoutMs, timeZone: config.timeZone };
   if (request.dateRange) options.dateRange = request.dateRange;
   else if (request.freshness) options.freshness = request.freshness;
   try {
-    const value = await whale.search(request.topic, options);
+    const value = await sdk.search(request.topic, options);
     return value && typeof value === 'object' ? value : { status: 'failed', reason: 'search_error', items: [], text: '' };
   } catch (error) {
     const reason = String((error && (error.code || error.message)) || 'search_error').slice(0, 40);
@@ -539,7 +544,7 @@ function diagnostic(evidence) {
 /**
  * 核心：吃一份搜索结果，产出结构化锐评。search 由调用方给，方便 chat 复用本轮证据。
  */
-async function judge(whale, request, config, search, nowMs = Date.now()) {
+async function judge(sdk, request, config, search, nowMs = Date.now()) {
   const started = Date.now();
   const evidence = buildEvidence(search, config.evidenceItems);
   const meta = searchMeta(evidence);
@@ -557,7 +562,7 @@ async function judge(whale, request, config, search, nowMs = Date.now()) {
       message: `只搜到 ${evidence.items.length} 条可用资料（至少 ${config.minItems} 条），先不锐评，免得编。`,
       ...base, evidence: found, elapsedMs: Date.now() - started };
   }
-  if (!whale || typeof whale.model !== 'function') {
+  if (!sdk || typeof sdk.model !== 'function') {
     return { ok: false, reason: 'model_unavailable', message: '宿主没有开放模型调用，无法生成锐评。',
       ...base, evidence: found, elapsedMs: Date.now() - started };
   }
@@ -565,7 +570,7 @@ async function judge(whale, request, config, search, nowMs = Date.now()) {
   let raw = null;
   let failure = '';
   try {
-    raw = await whale.model({
+    raw = await sdk.model({
       system: prompt.system,
       turns: [{ role: 'user', content: prompt.user }],
       maxTokens: config.modelMaxTokens,
@@ -688,9 +693,131 @@ function hostSearch(search) {
   };
 }
 
-async function runTool(ctx) {
-  const config = normalizeSettings(ctx.settings);
-  const request = analyzeToolInput(ctx.input, config, ctx.now || Date.now());
+
+// —— 新宿主 SDK 适配：只走 host.call，不访问内部 HTTP ——
+
+function hostSdk(host) {
+  if (!host || typeof host.call !== 'function') return null;
+  return {
+    search: async (query, options = {}) => {
+      const input = { query: String(query || '').slice(0, 2000) };
+      if (!input.query) throw new Error('search_query_empty');
+      if (options.freshness && FRESHNESS.includes(options.freshness) && options.freshness) input.freshness = options.freshness;
+      if (Number.isInteger(options.timeoutMs) && options.timeoutMs >= 500) input.timeoutMs = options.timeoutMs;
+      return host.call('search.query@1', input);
+    },
+    model: async ({ system, turns, maxTokens } = {}) => {
+      const input = { turns: Array.isArray(turns) ? turns : [] };
+      if (typeof system === 'string' && system) input.system = system.slice(0, 64000);
+      if (Number.isInteger(maxTokens) && maxTokens > 0) input.maxTokens = Math.min(maxTokens, 32000);
+      // model.complete@1 返回 {text}，judge() 需要的是文本；不 unwrap 会把对象当字符串用。
+      const out = await host.call('model.complete@1', input);
+      return out && typeof out.text === 'string' ? out.text : '';
+    },
+  };
+}
+
+function emptyChatSearch() {
+  return { text: '', items: [], status: 'empty' };
+}
+
+function toChatSearch(value) {
+  const normalized = normalizeSearch(value);
+  const items = normalized.items.slice(0, 30).map(item => ({
+    title: item.title || '（无标题）',
+    url: item.url || '',
+    snippet: item.snippet || '',
+    publishedAt: typeof item.publishedAt === 'string' ? item.publishedAt : null,
+    fetchedAt: typeof item.fetchedAt === 'string' ? item.fetchedAt : null,
+  }));
+  const status = ['ok', 'empty', 'failed'].includes(normalized.status)
+    ? normalized.status : (items.length ? 'ok' : 'empty');
+  return { text: normalized.text.slice(0, 32000), items, status };
+}
+
+// replace 的 chat.search 与 chat.generate 之间没有搜索上下文，且两次调用是两个进程：
+// 用 worker 私有 cwd 的文件缓存（TTL 3 分钟、最多 16 条、取一次即删）。
+const CACHE_FILE_NAME = 'ruiping-search-cache.json';
+const CACHE_TTL_MS = 3 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 16;
+
+function cachePath() { return path.join(process.cwd(), CACHE_FILE_NAME); }
+
+function cacheField(value, max) {
+  return typeof value === 'string' ? value.slice(0, max) : '';
+}
+
+function cacheEntry(message) {
+  return {
+    chatType: cacheField(message.chatType, 24),
+    chatId: cacheField(message.chatId, 120),
+    senderId: cacheField(message.senderId, 120),
+    msgId: cacheField(message.msgId, 200),
+    text: cacheField(message.text, 16000),
+  };
+}
+
+function cacheMatches(entry, wanted) {
+  if (!entry || typeof entry !== 'object') return false;
+  if (entry.chatType !== wanted.chatType || entry.chatId !== wanted.chatId || entry.text !== wanted.text) return false;
+  // search 的 message 目前没有 senderId/msgId（宿主只给 platform/chatType/chatId/text）；
+  // 两边都有时才做更严格的校验，避免把「有」和「没有」判成不同消息。
+  for (const field of ['senderId', 'msgId']) {
+    if (entry[field] && wanted[field] && entry[field] !== wanted[field]) return false;
+  }
+  return true;
+}
+
+function readCache(now) {
+  try {
+    const value = JSON.parse(fs.readFileSync(cachePath(), 'utf8').replace(/^\uFEFF/, ''));
+    const entries = Array.isArray(value && value.entries) ? value.entries : [];
+    return entries.filter(entry => entry && typeof entry === 'object'
+      && Number(entry.at) > now - CACHE_TTL_MS && entry.search && typeof entry.search === 'object');
+  } catch { return []; }
+}
+
+function writeCache(entries) {
+  try {
+    fs.mkdirSync(path.dirname(cachePath()), { recursive: true });
+    const temp = cachePath() + '.' + process.pid + '.tmp';
+    fs.writeFileSync(temp, JSON.stringify({ version: 1, entries: entries.slice(-CACHE_MAX_ENTRIES) }));
+    try { fs.renameSync(temp, cachePath()); } catch {
+      fs.rmSync(cachePath(), { force: true });
+      fs.renameSync(temp, cachePath());
+    }
+  } catch { /* 缓存只是省一次检索，读写失败不影响本轮 */ }
+}
+
+function rememberSearch(message, search) {
+  if (!message || !search) return;
+  // 单条检索结果太大时不落盘：缓存只是省一次检索，不能把状态文件写爆。
+  try {
+    if (JSON.stringify(search).length > 128 * 1024) return;
+  } catch { return; }
+  const now = Date.now();
+  const entries = readCache(now);
+  entries.push({ ...cacheEntry(message), at: now, search });
+  writeCache(entries);
+}
+
+function takeSearch(message) {
+  if (!message) return null;
+  const now = Date.now();
+  const wanted = cacheEntry(message);
+  const entries = readCache(now);
+  const index = entries.findIndex(entry => cacheMatches(entry, wanted));
+  if (index < 0) return null;
+  const [hit] = entries.splice(index, 1);
+  // 一次消费：即使本轮生成失败也不留给下一条同文消息，避免用旧检索结果答新消息。
+  writeCache(entries);
+  return hit.search;
+}
+
+
+async function runTool(input, context = {}) {
+  const config = normalizeSettings(context.settings);
+  const request = analyzeToolInput(input, config, Date.now());
   if (!request || !request.topic) {
     return { ok: false, reason: 'need_topic',
       message: '在「运行一次」里输入一个真实事件或结果，例如：昨天湖人打勇士谁赢了' };
@@ -699,37 +826,41 @@ async function runTool(ctx) {
     return { ok: false, reason: 'need_topic',
       message: '只看到「锐评」两个字，缺事件或结果。补一句，例如：锐评一下昨天湖人输球' };
   }
-  const search = await gather(ctx.whale, request, config);
-  return judge(ctx.whale, request, config, search, ctx.now || Date.now());
+  const sdk = hostSdk(context.host);
+  const search = await gather(sdk, request, config);
+  return judge(sdk, request, config, search, Date.now());
 }
 
-const hooks = {
-  'chat.search': async ctx => {
-    const config = normalizeSettings(ctx.settings);
-    if (!config.inChat) return {};
-    const request = parseRequest(ctx.message && ctx.message.text, config, ctx.now || Date.now());
-    if (!request || request.missingTopic) return {};
-    const payload = hostSearch(await gather(ctx.whale, request, config));
-    return payload ? { search: payload } : {};
+exports.providers = {
+  'chat.search@1': async (input, context = {}) => {
+    const config = normalizeSettings(context.settings);
+    const message = input?.message || {};
+    if (!config.inChat) return emptyChatSearch();
+    const request = parseRequest(message.text, config, Date.now());
+    if (!request || request.missingTopic) return emptyChatSearch();
+    const search = await gather(hostSdk(context.host), request, config);
+    rememberSearch(message, search);
+    return toChatSearch(search);
   },
 
-  'chat.pre_reply': async ctx => {
-    const config = normalizeSettings(ctx.settings);
-    if (!config.inChat || !config.wake) return {};
-    const request = parseRequest(ctx.message && ctx.message.text, config, ctx.now || Date.now());
-    if (!request || request.missingTopic) return {};
-    return { action: 'wake' };
+  'chat.pre_reply@1': async (input, context = {}) => {
+    const config = normalizeSettings(context.settings);
+    const message = input?.message || {};
+    if (!config.inChat || !config.wake) return { action: 'pass' };
+    const request = parseRequest(message.text, config, Date.now());
+    if (!request || request.missingTopic) return { action: 'pass' };
+    return { action: 'wake', reason: 'ruiping: wake on keyword' };
   },
 
-  'chat.generate': async ctx => {
-    const config = normalizeSettings(ctx.settings);
-    if (!config.inChat) return {};
-    const request = parseRequest(ctx.message && ctx.message.text, config, ctx.now || Date.now());
-    if (!request) return {};
-    if (request.missingTopic) return {}; // 没给事件，让宿主自己问，别硬编
-    const cached = ctx.search && Array.isArray(ctx.search.items) && ctx.search.items.length ? ctx.search : null;
-    const search = cached || await gather(ctx.whale, request, config);
-    const result = await judge(ctx.whale, request, config, search, ctx.now || Date.now());
+  'chat.generate@1': async (input, context = {}) => {
+    const config = normalizeSettings(context.settings);
+    const message = input?.message || {};
+    if (!config.inChat) return { text: '' };
+    const request = parseRequest(message.text, config, Date.now());
+    if (!request || request.missingTopic) return { text: '' };
+    const sdk = hostSdk(context.host);
+    const search = takeSearch(message) || await gather(sdk, request, config);
+    const result = await judge(sdk, request, config, search, Date.now());
     if (result.ok) return { text: renderChat(result, config) };
     if (result.reason === 'insufficient_evidence' || result.reason === 'model_says_insufficient') {
       return { text: '这次没搜到足够可靠的事实，先不锐评，免得编。' };
@@ -737,38 +868,9 @@ const hooks = {
     if (result.reason === 'verdict_numbers_unverified') {
       return { text: '这条里的数字我没在资料里核对到，先不锐评，免得编。' };
     }
-    return {}; // 模型/检索故障交回宿主，避免把异常当锐评发出去
+    // 新协议 replace 没有「交回宿主」通道；失败时返回空文本，由宿主按 plugin_empty 处理。
+    return { text: '' };
   },
 
-  'tool.run': runTool,
-};
-
-exports.version = VERSION;
-exports.hooks = hooks;
-exports.run = runTool;
-
-// 仅给本地测试用，宿主不会读这个字段。
-exports.__test = {
-  VERSION,
-  DEFAULTS,
-  normalizeSettings,
-  parseRequest,
-  analyzeToolInput,
-  plainRequest,
-  normalizeSearch,
-  searchMeta,
-  providerLabel,
-  buildEvidence,
-  numericCores,
-  cleanInline,
-  clip,
-  parseModelJson,
-  verifyFacts,
-  buildPrompt,
-  gather,
-  judge,
-  renderChat,
-  hostSearch,
-  dateHint,
-  todayIn,
+  'tool.run@1': runTool,
 };

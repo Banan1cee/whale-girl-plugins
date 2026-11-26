@@ -1,101 +1,126 @@
 {
-  "Id": "smart-care",
-  "Name": "智能搭话",
-  "Author": "Jy-Levent",
-  "Version": "1.1.1",
-  "MinAppVersion": "4.1.2",
-  "Description": "让鲸鲸主动搭话带真实热点，还会因为被无视而逐渐生气。① 点名搭话：私聊发「去找 tree 搭话」，给指定联系人发带上下文的关心话（昵称反查 wxid、真实昵称定位、回执可见；昵称带点号如「几度雨停.」也能识别）。② 定时搭话：跟随本体「主动与提醒」开关（开→插件工作、关→插件停），按本体时间窗/白名单自动发，直连 DeepSeek Search API 拿网页正文+AI 动态搜索角度+时效限定，说出「新角色菈乌玛你抽了吗」这种有料的话；用共享账本软压本体避免双发，生气或达每日上限时自动停发。③ 被无视会生气（按时间三级、按人隔离——谁没回她她生谁的气，不会波及别人）：streak≥2 且沉默超30分钟才发作，每级只发一条——level1 有点不爽→level2 真火大→level3 心寒；生气中停止定时搭话，level3 发完心寒话后永久静默，只有对方道歉才能消气；生气话同样进「最近动态」，不输出情绪标签。搭话与生气自动错开间隔（默认10分钟），不会连发两条。所有失败自动退回、不吞消息。兴趣从人设动态提取，改人设即生效。需 DeepSeek Key（用宿主 websearch 配置）。",
-  "ResultLabel": "智能搭话",
-  "Api": 4,
-  "Kind": "message",
-  "Hooks": [
-    "timer.tick",
-    "chat.generate",
-    "chat.prompt",
-    "chat.search"
-  ],
-  "Permissions": [
-    "system.full"
-  ],
-  "ExecutionTimeoutMs": 45000,
-  "IntervalSeconds": 60,
-  "Settings": [
-    {
-      "Key": "enabled",
-      "Name": "启用",
-      "Type": "boolean",
-      "Default": true,
-      "Description": "关闭后插件完全不干预"
+  "format": "whale-plugin/1",
+  "level": 4,
+  "id": "smart-care",
+  "name": "智能搭话（新协议版）",
+  "author": "Jy-Levent",
+  "version": "2.0.1",
+  "minAppVersion": "4.3.0",
+  "description": "保留点名搭话、搜索增强、定时主动搭话与被无视生气；内部 config/care-state/contacts/persona/DeepSeek Key 直读全部改为 host.call 或降级，官方 care 同时开启时可能双发。",
+  "entry": "plugin.js",
+  "runtime": "node-full",
+  "provides": {
+    "task.tick@1": {
+      "mode": "schedule",
+      "scope": "all",
+      "intervalSeconds": 60
     },
-    {
-      "Key": "minIntervalMinutes",
-      "Name": "搜索最小间隔（分钟）",
-      "Type": "number",
-      "Default": 30,
-      "Description": "两次强制搜索之间的最短间隔"
+    "chat.pre_reply@1": {
+      "mode": "gate",
+      "scope": "all"
     },
-    {
-      "Key": "maxPerHour",
-      "Name": "每小时搜索上限",
-      "Type": "number",
-      "Default": 4,
-      "Description": "限制联网预算"
+    "chat.prompt@1": {
+      "mode": "enhance",
+      "scope": "all"
     },
-    {
-      "Key": "careInterestChance",
-      "Name": "搭话带兴趣话题的概率(%)",
-      "Type": "number",
-      "Default": 90,
-      "Description": "点名和定时搭话共用：按人设兴趣搜近况来开场话的概率；其余走普通关心，搜索失败也会退回普通关心"
-    },
-    {
-      "Key": "autoCare",
-      "Name": "接管定时主动搭话",
-      "Type": "boolean",
-      "Default": true,
-      "Description": "按本体 config.care 的时间窗/间隔/白名单，到点自动发一条带兴趣话题的搭话，并写入共享账本让本体少发；本体配置一行不用改"
-    },
-    {
-      "Key": "angryEnabled",
-      "Name": "被无视会生气",
-      "Type": "boolean",
-      "Default": true,
-      "Description": "连续 N 次主动搭话没人回，就按人设生气：有人说话时带怒气口吻回复，或主动发一句抱怨到原会话"
-    },
-    {
-      "Key": "ignoreThreshold",
-      "Name": "连续几次没回才生气",
-      "Type": "number",
-      "Default": 2,
-      "Description": "连续这么多次主动搭话被无视后触发生气，1~10"
-    },
-    {
-      "Key": "ignoreWindowMinutes",
-      "Name": "多久没回算被无视（分钟）",
-      "Type": "number",
-      "Default": 20,
-      "Description": "搭话后这么多分钟内目标没回话就算被无视一次，1~240。改短→更快判定更快生气"
-    },
-    {
-      "Key": "outboundGapMinutes",
-      "Name": "搭话/生气间隔（分钟）",
-      "Type": "number",
-      "Default": 10,
-      "Description": "搭话和生气两类主动消息之间的最小间隔，0~240；避免同一轮连发两条，默认10分钟"
-    },
-    {
-      "Key": "angryStartDelayMinutes",
-      "Name": "生气触发延迟（分钟）",
-      "Type": "number",
-      "Default": 30,
-      "Description": "累计被无视达阈值后，还要再沉默这么久才真正开始生气，1~720。默认30"
-    },
-    {
-      "Key": "angryLevelUpMinutes",
-      "Name": "生气升级间隔（分钟）",
-      "Type": "number",
-      "Default": 60,
-      "Description": "生气后每满这么久升一级（L1→L2→L3），5~720。默认60"
+    "chat.search@1": {
+      "mode": "replace",
+      "scope": "all"
     }
+  },
+  "calls": [
+    "care.decide@1",
+    "contacts.list@1",
+    "persona.read@1",
+    "model.complete@1",
+    "message.send@1",
+    "search.query@1"
+  ],
+  "settingsSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "title": "启用",
+        "description": "关闭后插件完全不干预。"
+      },
+      "minIntervalMinutes": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1440,
+        "title": "搜索最小间隔（分钟）",
+        "description": "两次搜索增强之间的最短间隔，默认 30。"
+      },
+      "maxPerHour": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 60,
+        "title": "每小时搜索上限",
+        "description": "限制联网预算，默认 4。"
+      },
+      "careInterestChance": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100,
+        "title": "带兴趣话题的概率",
+        "description": "点名/定时搭话使用兴趣话题的百分比，默认 90。"
+      },
+      "autoCare": {
+        "type": "boolean",
+        "title": "接管定时主动搭话",
+        "description": "按宿主 care 配置的窗口/白名单/频率主动搭话；默认开。"
+      },
+      "angryEnabled": {
+        "type": "boolean",
+        "title": "被无视会生气",
+        "description": "连续被无视后按等级生气；默认开。"
+      },
+      "ignoreThreshold": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10,
+        "title": "连续几次没回才生气",
+        "description": "默认 2。"
+      },
+      "ignoreWindowMinutes": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 240,
+        "title": "多久没回算被无视（分钟）",
+        "description": "默认 20。"
+      },
+      "outboundGapMinutes": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 240,
+        "title": "搭话/生气间隔（分钟）",
+        "description": "两类主动消息的最小间隔，默认 10。"
+      },
+      "angryStartDelayMinutes": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 720,
+        "title": "生气触发延迟（分钟）",
+        "description": "达到阈值后还要沉默多久才发第一句，默认 30。"
+      },
+      "angryLevelUpMinutes": {
+        "type": "number",
+        "minimum": 5,
+        "maximum": 720,
+        "title": "生气升级间隔（分钟）",
+        "description": "每级间隔，默认 60。"
+      },
+      "interestWords": {
+        "type": "string",
+        "maxLength": 400,
+        "title": "兴趣词（逗号分隔）",
+        "description": "旧版从 persona.customPrompt 自动提取；新 persona.read 不返回 customPrompt，改为显式填写。"
+      }
+    },
+    "additionalProperties": false
+  },
+  "executionTimeoutMs": 45000,
+  "dataAccess": [
+    "model.prompt"
   ]
 }

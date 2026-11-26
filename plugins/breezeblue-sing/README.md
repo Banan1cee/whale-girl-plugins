@@ -1,86 +1,102 @@
-# Breezeblue 翻唱（本地发送器版，breezeblue-sing）
+# Breezeblue 翻唱（breezeblue-sing）· whale-plugin/1
 
-点歌插件：群聊/私聊点歌后自动找音源、切 30 秒副歌，用 breezeblue 音色经本机 seed-vc 翻唱，并通过**本地发送器直接发成微信语音**。
+这是 `breezeblue-sing` 从旧 **Api 4 JavaScript** 迁移到 **4 级 `whale-plugin/1`** 的版本。旧源码完整保留在 `legacy/`，不进入安装包。
 
-这是独立实现的新插件 ID（`breezeblue-sing`），不改动市场上的旧 `breeze-sing`；运行时由配套安装器部署，**不修改鲸鲸主程序、不需要宿主语音补丁**。
+> **与 `breeze-sing` 共用同一份引擎代码**：两个目录的 `plugin.js` 逐字节相同（SHA-256 `9973ccd0cabd3c07a83ee210d6ea093603d015a217656e4eb4ec5b3f4c0f1188`，34959 字节），`plugin.json` 只有 `id`/`name`/`author`/`version` 四个字段不同（`description`、`settingsSchema`、`provides`、`calls` 完全一致）。也就是说两者是同一实现的两个目录条目，不是两套功能；改行为时两个目录都要改。是否合并成一条由维护者决定（见市场仓库 issue）。
 
-## 重要：不是纯 JS 单文件插件
+> **先看限制：本版本不能把翻唱音频发成微信语音。**
+> 新协议没有音频文件投递能力；`message.send@1` 的 `delivery:'voice'` 只是让宿主用文本走语音通道，不能送出 `[[cover:<id>]]` 或任意音频文件。旧版“本地发送器直接发微信语音”的链路在新协议下不存在；点歌、渲染、队列仍保留，成品留在本机 cover 数据目录，需要手动播放。
 
-本插件是 Api 4 完整权限插件，但只靠 ZIP 不能独立跑起来：
+## 等级与声明
 
-- Windows 10/11 x64 + NVIDIA GPU（建议 ≥6GB 显存）
-- 微信 PC 4.2
-- 鲸鲸 4.1.2+
-- 磁盘 ≥10GB
-- 配套安装器负责：Python/torch/seed-vc/模型/ffmpeg、语音发送 venv、VB-CABLE、参考音、插件写入
+| 项 | 值 |
+| --- | --- |
+| 等级 | 4（`plugin.js` / `node-full`） |
+| provides | `chat.pre_reply@1`（gate/all）、`task.tick@1`（schedule/all，10 秒）、`tool.run@1`（tool/manual） |
+| calls | `message.send@1`（只发文本/语音意图；没有音频文件） |
+| settings | `coverCli`、`dataDir`、`python`、`ffmpeg`、`engine`（仅 seedvc）、`maxSeconds`、`onlyGroup`、`autoRender` |
+| 超时 | 单次 20 秒；渲染在 detached 子进程，不占 20 秒预算 |
 
-## 安装
+4 级 Node 仍是完整系统权限，不是沙箱；插件会启动本机 `cover.mjs` / `breeze-prep.mjs`，安装前请自行审查。插件不读宿主 config，不调 `/api/*`，不注册端口。
 
-1. 先运行安装器（运行时 + 发送器 + VB-CABLE + 参考音 + 插件写入）；
-2. 打开鲸鲸「插件市场 → 已安装 → Breezeblue 翻唱（本地发送器版）→ 设置」确认路径；
-3. 重启鲸鲸内核，私聊发 `点歌 起风了` 做冒烟测试。
+## 设置
 
-设置示例：
+全部设置在插件卡片「设置」；卡片会把设置作为 `ctx.settings` 传给入口。留空/缺省时使用以下默认值：
 
 ```json
 {
-  "coverCli": "%USERPROFILE%\\whale-cover\\tools\\cover.mjs",
-  "python": "%USERPROFILE%\\whale-cover\\engine\\venv\\Scripts\\python.exe",
-  "ffmpeg": "%USERPROFILE%\\whale-cover\\tools\\ffmpeg",
-  "dataDir": "%USERPROFILE%\\whale-cover\\data",
-  "voicePython": "%USERPROFILE%\\whale-cover\\voice\\venv\\Scripts\\python.exe",
-  "voiceSender": "%USERPROFILE%\\whale-cover\\voice\\send_cover.py",
+  "coverCli": "",
+  "dataDir": "",
+  "python": "",
+  "ffmpeg": "",
   "engine": "seedvc",
-  "maxSeconds": 30,
-  "onlyGroup": false,
-  "neteaseCookies": "%USERPROFILE%\\whale-cover\\cookies.txt",
-  "proactiveEnabled": true,
-  "proactiveIdleMinutes": 120,
-  "proactiveDailyMax": 2,
-  "proactiveQuietStart": "22:30",
-  "proactiveQuietEnd": "09:00",
-  "proactiveCooldownMinutes": 360,
-  "allowDownload": true,
-  "downloadCandidates": ["晴天", "后来", "小幸运"]
+  "maxSeconds": 54,
+  "onlyGroup": true,
+  "autoRender": true
 }
 ```
 
-- `neteaseCookies` 只填 **cookie 文件路径**，插件不保存、不打包账号数据。
-- 单主人/双主人都支持：双主人显示「主人1/主人2」，单主人显示「主人」。
-- 主动唱歌默认开启；`proactiveEnabled: false` 关闭。
+- `coverCli`：本机 `whale-cover/tools/cover.mjs` 路径；留空按 `~/whale-cover/tools/cover.mjs`、desktop profile 的 `dsh-whale-cover` 顺序查找。
+- `dataDir`：`orders/`、`work/`、`prep-status/`、`songs/` 根目录；留空用 `WHALE_COVER_DATA_DIR`，再留空用 `~/.dsh/whale-cover`。
+- `python` / `ffmpeg`：只供 `breeze-prep.mjs` 使用；留空走默认路径。
+- `engine`：当前只支持 `seedvc`。旧 RVC 订单不会被本插件处理。
+- `maxSeconds`：10–180，默认 54。
+- `onlyGroup`：默认 `true`；私聊只响应「唱」，不接管「点歌」。
+- `autoRender`：默认 `true`；关闭后 `task.tick` 不做自动渲染，仍可用手动工具。
 
-## 命令
+## 命令（聊天内）
 
-- `点歌 起风了` / `点歌 起风了 - 买辣椒也用券`
-- 私聊点歌先回 `是《起风了》对吧，我先找原曲～`；群聊回排队位次
-- `点歌单`、`取消点歌 起风了`
-- `唱 安荣`
-- `把《安荣》唱给主人2听`（单主人用「主人」）
-- 唱完约 12 秒补一句“我唱了《歌名》，你觉得好听吗？”
-- 闲时主动唱歌：文字 → 语音 → 追问
+宿主基础闸（禁言/白名单/去重/静音）通过后，`chat.pre_reply@1` 就会收到消息并处理这些命令；**不要求消息已经 @ 或已经被判定要回复**：
 
-## 测试用例
+- `点歌 起风了`
+- `点歌 起风了 - 买辣椒也用券`
+- `点歌帮助` / `点歌菜单`
+- `点歌单` / `排队`
+- `取消点歌 起风了`
+- `唱 起风了`：只返回文本说明成品位置；**不会发语音/音频**
 
-| 组 | 输入 | 预期 |
-| --- | --- | --- |
-| 1 点歌 | 群里发 `点歌 起风了` | 回排队位次；完成后 30 秒语音，无“收到/进度/做好了”过程话术 |
-| 2 私聊点歌 | 私聊发 `点歌 起风了` | 立即回 `是《起风了》对吧，我先找原曲～`；完成后语音 + 追问 |
-| 3 唱成品 | 私聊发 `唱 安荣` | 只发语音；约 12 秒后补“主人1，我唱了《安荣》，你觉得好听吗？” |
-| 4 唱给主人 | 私聊发 `把《安荣》唱给主人2听` | 给主人2发“主人1让我把这首《安荣》唱给你听～”+ 语音 + 追问；回执 |
-| 5 容错 | 私聊发 `唱 不存在的歌` | 回“《不存在的歌》还没唱好，等做好了再喊我。” |
+插件用 `message.send@1` 发回复后返回 `{action:'skip'}`，宿主不再发默认回复。当前 `chat.pre_reply@1` 在宿主基础闸之后、`wake` 早退之前调用：`skip` 压制已触发的回复，`wake` 可让原本不回复的消息开口（本插件不返回 `wake`），`pass` 保持原判定。因此未 @ 的群友发「点歌」也会进入插件并落单，只要它没被禁言/白名单/去重/静音或「明确在叫别人」挡下；被挡下的消息不会进入 gate。需要完全绕开宿主闸时，请用私聊、@ 或手动工具。
 
-第 1–4 组需要运行时、VB-CABLE、微信前台；仅验证安装/设置时测第 5 组。
+## 手动工具
 
-## 已知限制
+卡片「设置 → 运行一次」输入 JSON：
 
-- 成品是副歌片段，不是完整歌曲；音源可能只有翻唱/Live 版。
-- 语音发送依赖微信 UIA 与前台窗口；被遮挡或窗口切走会失败并提示，不会发到错误会话。
-- 渲染约 8–14 分钟（6GB 显卡建议 ≤30 秒），由独立子进程完成，插件 timer 只轮询状态。
-- 换机器需迁移运行时数据（`dataDir` 下 orders/work）。
-- 微信升级可能破坏 UIA；当前只保证 4.2。
+```json
+{ "action": "status" }
+```
 
-## 1.0.0
+支持：
 
-- 新插件 ID `breezeblue-sing`，与旧 `breeze-sing` 并存。
-- 本地发送器直连，不需要鲸鲸宿主补丁。
-- 支持群聊/私聊点歌、`唱`、`唱给主人`、闲时主动唱歌、网易云 cookies 路径、30 秒成品。
+- `{"action":"status"}`：返回 cover 队列 JSON（不发送消息）。
+- `{"action":"order","chatId":"...","chatType":"group","senderId":"...","senderName":"...","chatTitle":"...","text":"点歌 起风了"}`。
+- `{"action":"list","chatId":"...","chatType":"group"}`。
+- `{"action":"cancel","chatId":"...","senderId":"...","senderName":"...","song":"起风了"}`。
+- `{"action":"sing","chatId":"...","chatType":"group","song":"起风了"}`：只回文本说明。
+- `{"action":"tick"}`：立即跑一轮自动队列。
+
+`chatId` 是宿主会话 id；`name` 仅展示，不能按群名搜索会话。
+
+## 和旧版的逐条差异
+
+1. **翻唱音频无法发语音（最严重）**：删除 `whale.sendVoice('[[cover:<id>]]')` 与 `cover voice ensure`；旧“本地发送器直接发微信语音”的链路不再存在。成品只能留在本机 cover 目录。
+2. **聊天内点歌触发范围恢复**：旧 `chat.pre_reply` 在触发判定前运行；迁移初期新宿主只在已决定回复时调用 gate，未 @ 的群消息进不来。**已修**：当前 gate 在宿主基础闸之后、`wake` 早退之前调用，`skip` 压制默认回复，所以未 @ 的群友点歌也能落单；仍受禁言/白名单/去重/静音、以及宿主「明确在叫别人」判定约束，且本插件不返回 `wake`。
+3. **删除宿主语音签名同步**：旧插件读宿主 `data/voice-send.json` 并调 `cover engine ref`；新协议没有对应宿主 config/call，相关代码已删除。参考音请在本机 cover 引擎配置。
+4. **删除 `whale.*` 与 `/api/*`**：旧代码只用 `whale.sendText/sendVoice`，现改为 `host.call('message.send@1')`；不再读宿主目录/环境私货。
+5. **不用宿主会话 `state`**：宿主的 state 通道现在可用于 `chat.pre_reply@1` 等聊天能力，但它是「插件 × 会话」级、≤8 KiB/200 会话且进程重启丢失；本插件的点歌队列/去重/自动渲染状态跨会话、跨 tick，所以继续写插件 data 目录（`process.cwd()`）的 `auto-state.json`、`recent.json`、`tick.lock`。旧版的模块级 `recent` 不再跨调用保留。
+6. **`timer.tick` → `task.tick@1`**：10 秒间隔保留；每次是新执行上下文，队列由 `auto-state.json` 恢复；用 `tick.lock` 防重叠。
+7. **旧设置不继承**：旧插件的授权 settings 不会自动映射到新的 `settingsSchema`，需要重新填写；缺省值见上。
+8. **市场 id**：沿用 `breezeblue-sing`，版本升到 `2.0.0`；合并后 `build-index.js` 会从 `index-v4.json` 移除旧条目并生成 `index-v5.json`。旧包 `packages/breezeblue-sing-1.0.0.zip` 保留，不覆盖。
+9. **引擎仅 seedvc**：旧 RVC 订单不会处理；schema 也不再提供 `rvc` 选项。
+10. **README 宣称的 cookies / 主人1/主人2 / 闲时主动唱歌**：旧代码本来就不含这些逻辑，迁移后也没有本地发送器/宿主补丁入口；不要按旧 README 的承诺理解。
+11. **没有 `ResultLabel`、没有 HostAction**：新协议清单没有这些字段；本插件只保留手动 `tool.run@1` 与文本回复。
+
+## 旧源码
+
+`legacy/plugin.js`、`legacy/plugin.json`、`legacy/README.md` 是迁移前原样文件，供对照/回滚，不会被打进 ZIP（`scripts/package.js` 只打包根目录的 `plugin.json` + 入口）。
+
+## 验证记录
+
+- `node scripts/package.js plugins/breezeblue-sing`：生成 `packages/breezeblue-sing-2.0.0.zip`。
+- `node scripts/plugin-cli.js validate plugins/breezeblue-sing` / `test`：通过（静态，不执行）。
+- `python validate.py --root . --json`：在生成 `index-v5.json` 的镜像根上通过；详见迁移报告。
+- 未 GUI 试装、未运行 cover/seed-vc/ffmpeg、未联网。

@@ -1,20 +1,75 @@
 {
-    "Id":  "breezeblue-sing",
-    "Name":  "Breezeblue 翻唱（本地发送器版）",
-    "Author":  "RacOrange",
-    "Version":  "1.0.0",
-    "MinAppVersion":  "4.1.2",
-    "Description":  "点歌后自动找音源、切 30 秒副歌，用 breezeblue 音色经本机 seed-vc 翻唱，并通过本地发送器直接发成微信语音。支持群聊/私聊点歌、唱、唱给主人1/主人2、闲时主动唱歌与网易云 cookies 路径；不依赖鲸鲸宿主补丁、不修改主程序。运行时由配套安装器部署，不随市场 ZIP 分发。",
-    "ResultLabel":  "翻唱语音",
-    "Api":  4,
-    "Kind":  "message",
-    "Hooks":  [
-                  "chat.pre_reply",
-                  "timer.tick"
-              ],
-    "Permissions":  [
-                        "system.full"
-                    ],
-    "ExecutionTimeoutMs":  20000,
-    "IntervalSeconds":  10
+  "format": "whale-plugin/1",
+  "level": 4,
+  "id": "breezeblue-sing",
+  "name": "Breezeblue 翻唱（本地发送器版，新协议）",
+  "author": "RacOrange",
+  "version": "2.0.0",
+  "minAppVersion": "4.3.0",
+  "description": "保留点歌落单、副歌渲染、队列轮询与文本提示；受 whale-plugin/1 限制，聊天内点歌只在宿主已决定回复时触发，且翻唱音频不能作为微信语音发送。",
+  "entry": "plugin.js",
+  "runtime": "node-full",
+  "provides": {
+    "chat.pre_reply@1": { "mode": "gate", "scope": "all" },
+    "task.tick@1": { "mode": "schedule", "scope": "all", "intervalSeconds": 10 },
+    "tool.run@1": { "mode": "tool", "scope": "manual" }
+  },
+  "calls": [
+    "message.send@1"
+  ],
+  "settingsSchema": {
+    "type": "object",
+    "properties": {
+      "coverCli": {
+        "type": "string",
+        "maxLength": 400,
+        "title": "cover.mjs 路径",
+        "description": "本机 whale-cover 的 CLI 入口；留空按默认位置查找。"
+      },
+      "dataDir": {
+        "type": "string",
+        "maxLength": 400,
+        "title": "数据目录",
+        "description": "orders/work/prep-status/songs 根目录；留空用 ~/.dsh/whale-cover。"
+      },
+      "python": {
+        "type": "string",
+        "maxLength": 400,
+        "title": "Python 路径",
+        "description": "breeze-prep 使用的 Python；留空用引擎 venv 默认路径。"
+      },
+      "ffmpeg": {
+        "type": "string",
+        "maxLength": 400,
+        "title": "ffmpeg 目录",
+        "description": "breeze-prep 使用的 ffmpeg 目录；留空自动探测。"
+      },
+      "engine": {
+        "type": "string",
+        "enum": ["seedvc"],
+        "title": "引擎",
+        "description": "翻唱引擎；当前迁移版只支持 seedvc（旧 rvc 订单不会处理）。"
+      },
+      "maxSeconds": {
+        "type": "integer",
+        "minimum": 10,
+        "maximum": 180,
+        "title": "副歌秒数",
+        "description": "截取并翻唱的副歌长度，默认 54 秒。"
+      },
+      "onlyGroup": {
+        "type": "boolean",
+        "title": "仅群聊点歌",
+        "description": "默认 true：私聊只响应「唱」；关闭后私聊也接受点歌。"
+      },
+      "autoRender": {
+        "type": "boolean",
+        "title": "自动渲染队列",
+        "description": "默认 true：task.tick 自动起 prep/render；关闭后只保留手动工具。"
+      }
+    },
+    "additionalProperties": false
+  },
+  "executionTimeoutMs": 20000
 }
+

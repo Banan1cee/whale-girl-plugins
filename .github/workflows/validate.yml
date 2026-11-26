@@ -1,4 +1,8 @@
 name: validate-market
+
+# 维护工具 CI（不是上架门禁）：
+#   候选分支只作为数据被覆盖到临时副本里，校验器用可信 base 的 validate.py。
+#   绝不执行候选的 validate.py、脚本、测试或工作流。
 on:
   pull_request:
   push:
@@ -8,10 +12,105 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: trusted
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          path: candidate
+          fetch-depth: 1
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python validate.py
-      - run: python -m unittest test_validate
+      - name: 校验 protocol.json 内部一致性（registry 重算 SHA-256）
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          set -euo pipefail
+          # protocol.json 里的 registry 是宿主 pluginProtocolRegistry.json 的副本，
+          # _source.sha256 是对它的内容承诺。这里用生成时同一套规范化序列化重算，
+          # 不一致就失败：不联网、不读宿主仓库，只有本文件自己的数据。
+          # 本步只看内容；protocol.json 是否存在由后面的 validate.py 把关。
+          python - trusted/protocol.json candidate/protocol.json <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+
+          def canonical(registry):
+              # 生成时用的规范化：2 空格缩进、不转义非 ASCII、保留键序、
+              # 结尾一个换行、UTF-8 无 BOM。改动这里等于改协议的哈希口径。
+              return (json.dumps(registry, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
+
+
+          def check(path):
+              data = json.loads(path.read_text(encoding='utf-8'))
+              registry = data.get('registry')
+              source = data.get('_source') if isinstance(data.get('_source'), dict) else {}
+              recorded = str(source.get('sha256') or '').strip().lower()
+              if not isinstance(registry, dict):
+                  print(f'{path}: 缺少 registry 对象')
+                  return False
+              if len(recorded) != 64 or any(c not in '0123456789abcdef' for c in recorded):
+                  print(f'{path}: _source.sha256 缺失或不是 64 位小写十六进制')
+                  return False
+              computed = hashlib.sha256(canonical(registry)).hexdigest()
+              if computed != recorded:
+                  print(f'{path}: registry 与 _source.sha256 不一致')
+                  print(f'  记录: {recorded}')
+                  print(f'  重算: {computed}')
+                  return False
+              print(f'{path}: registry SHA-256 一致 {computed}')
+              return True
+
+
+          failed = False
+          for name in sys.argv[1:]:
+              path = Path(name)
+              if not path.is_file():
+                  print(f'{path}: 不存在，跳过（存在性由 validate.py 把关）')
+                  continue
+              try:
+                  ok = check(path)
+              except (OSError, ValueError) as error:
+                  print(f'{path}: 读取或解析失败：{error}')
+                  ok = False
+              failed = failed or not ok
+          sys.exit(1 if failed else 0)
+          PY
+      - name: 用可信 base 的校验器检查候选数据
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          set -euo pipefail
+          # 候选 .git 不作为数据带入临时副本：git 元数据不属于市场数据，
+          # 也不让候选通过 .git/config 影响维护 CI。updatedAt 缺失由校验器接受。
+          rm -rf "$RUNNER_TEMP/market"
+          cp -a trusted "$RUNNER_TEMP/market"
+          rm -rf "$RUNNER_TEMP/market/.git"
+          if [ -d candidate ]; then
+            for path in plugins packages provenance; do
+              if [ -e "candidate/$path" ] && find "candidate/$path" -type l -print -quit | grep -q .; then
+                echo "symlinks are not allowed in candidate data: $path"
+                exit 1
+              fi
+            done
+            for path in plugins packages provenance discussion-issues.json \
+                        index.json index-v2.json index-v3.json index-v4.json index-v5.json index-personas.json; do
+              rm -rf "$RUNNER_TEMP/market/$path"
+              if [ -e "candidate/$path" ]; then cp -a "candidate/$path" "$RUNNER_TEMP/market/$path"; fi
+            done
+          fi
+          cd "$RUNNER_TEMP/market"
+          python validate.py
+          python -m unittest test_validate

@@ -1,15 +1,101 @@
 {
-  "Id": "codebuddy-cli-model",
-  "Name": "CodeBuddy CLI 直连",
-  "Author": "Grace-alan510",
-  "Version": "1.2.0",
-  "MinAppVersion": "4.1.2",
-  "Description": "【安装前必读】在鲸鲸「插件市场」页顶部勾选「启用 JavaScript 插件（实验性，完整系统权限）」总开关（不在左侧「设置」页），再到「插件市场 → 从本地安装」装 ZIP 并确认 system.full 授权；不开总开关插件不会被加载，也不会有任何报错。需 4.1.2 或以上。卡片「设置」最上面的大框必须填完整 JSON 对象：{\"apiKey\":\"你的Key\"}；只粘一串裸 Key 不生效，缺 Key 时插件会在微信里给出可直接复制的模板与「最省事改法」。启用后本轮回复改由本机 CodeBuddy CLI 生成（chat.generate 返回 text），不需要 8788 桥接、不用改 provider/settings，失败自动回退原模型；Key 等只在使用者本机填写，不随包分发。默认模型 deepseek-v4.1-flash；换模型不用手敲：微信发「模型」看编号菜单、回数字切换，发「当前模型」查询、发「恢复默认模型」还原；高级用户可在设置 model 里填编号、别名或完整 ID（优先级最高）。选择只存一个模型 ID，不含个人信息。默认不发送聊天历史、不写日志、不主动发消息、不修改宿主配置。",
-  "ResultLabel": "CLI 应答",
-  "Api": 4,
-  "Kind": "message",
-  "Hooks": ["chat.prompt", "chat.generate"],
-  "Permissions": ["system.full"],
-  "ExecutionTimeoutMs": 120000,
-  "IntervalSeconds": 60
+  "format": "whale-plugin/1",
+  "level": 4,
+  "id": "codebuddy-cli-model",
+  "name": "CodeBuddy CLI 直连",
+  "author": "Grace-alan510",
+  "version": "2.0.2",
+  "minAppVersion": "4.3.0",
+  "description": "本轮回复交给本机 CodeBuddy CLI 生成；失败或跳过时用鲸鲸原模型回复。Key 只在用户本机设置里保存，不进包；默认不发送聊天历史。支持微信内发「模型」菜单切换、发「当前模型」查询、发「恢复默认模型」还原。",
+  "entry": "plugin.js",
+  "runtime": "node-full",
+  "executionTimeoutMs": 120000,
+  "provides": {
+    "chat.generate@1": {
+      "mode": "replace",
+      "scope": "all"
+    }
+  },
+  "calls": [
+    "model.complete@1"
+  ],
+  "settingsSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "maxLength": 500,
+        "title": "CodeBuddy API Key",
+        "description": "只保存在本机设置里，不随包分发"
+      },
+      "model": {
+        "type": "string",
+        "maxLength": 120,
+        "title": "模型",
+        "description": "编号/别名/完整 ID；留空则用菜单选择或默认模型"
+      },
+      "cliEntry": {
+        "type": "string",
+        "maxLength": 1000,
+        "title": "CLI 入口路径",
+        "description": "留空则自动探测 npm 全局安装位置"
+      },
+      "cwd": {
+        "type": "string",
+        "maxLength": 1000,
+        "title": "CLI 工作目录",
+        "description": "留空则用用户主目录"
+      },
+      "internetEnvironment": {
+        "type": "string",
+        "maxLength": 200,
+        "title": "联网环境变量",
+        "description": "透传给 CLI 的可选环境名"
+      },
+      "useHostSystem": {
+        "type": "boolean",
+        "title": "使用宿主 system",
+        "description": "默认开启，把鲸鲸 system prompt 交给 CLI"
+      },
+      "historyTurns": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 12,
+        "title": "携带历史轮数",
+        "description": "默认 0；开启后把最近 N 轮交给 CLI"
+      },
+      "skipPatterns": {
+        "type": "string",
+        "maxLength": 2000,
+        "title": "跳过词",
+        "description": "换行或逗号分隔；命中时交回原模型"
+      },
+      "onError": {
+        "type": "string",
+        "enum": [
+          "notify-once",
+          "fallback"
+        ],
+        "title": "失败处理",
+        "description": "notify-once 每会话提示一次，fallback 静默交回原模型"
+      },
+      "debug": {
+        "type": "boolean",
+        "title": "显示错误码",
+        "description": "默认关闭，只在提示里附加错误类别"
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 115000,
+        "title": "CLI 超时",
+        "description": "默认 110000 毫秒"
+      }
+    }
+  },
+  "dataAccess": [
+    "model.prompt",
+    "chat.history"
+  ]
 }

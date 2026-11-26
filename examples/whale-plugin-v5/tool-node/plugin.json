@@ -1,0 +1,16 @@
+{
+  "format": "whale-plugin/1",
+  "level": 4,
+  "id": "example-tool",
+  "name": "示例工具",
+  "author": "Your Name",
+  "version": "1.0.0",
+  "minAppVersion": "4.3.0",
+  "description": "示例：4 级 Node 工具，统计输入文本的字符数并可读取宿主版本",
+  "entry": "plugin.js",
+  "runtime": "node-full",
+  "provides": {
+    "tool.run@1": { "mode": "tool", "scope": "manual" }
+  },
+  "calls": ["status.read@1"]
+}

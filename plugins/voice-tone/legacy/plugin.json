@@ -1,0 +1,51 @@
+{
+  "Id": "voice-tone",
+  "Name": "语音语气",
+  "Author": "Jy-Levent",
+  "Version": "1.0.3",
+  "MinAppVersion": "4.1.2",
+  "Description": "按 data/voice-presets.json 的当前预设同步 Breeze TTS 语气指令，并按每套预设自己的语音概率（voiceChance）决定这条发语音还是文字——发语音时插入官方音效标签（[喊叫]/[叹气] 等，只用鲸鲸支持的 34 个）；预设缺失自动生成内置默认（暴躁/呆萌/普通/温柔/冷酷 五套），已存在绝不覆盖。切换语气：改 voice-presets.json 最上面的 active 一个词即可（irritable 暴躁 / adorkable 呆萌 / normal 普通 / gentle 温柔 / cold 冷酷），下条回复生效、无需重启。发送交给鲸鲸原生流程，不会吞消息，也不会给文字回复塞标签。仅适用于 Breeze TTS。配套编辑器在作者仓库 Jy-Levent/whale-voice-tone-tools，另外下载就好。",
+  "Settings": [
+    {
+      "Key": "enabled",
+      "Name": "启用",
+      "Type": "boolean",
+      "Default": true,
+      "Description": "关闭后插件完全不干预：不改语音方式、不加标签、不往提示词里注入规则"
+    },
+    {
+      "Key": "preset",
+      "Name": "使用哪套预设（留空=用文件里的 active）",
+      "Type": "string",
+      "Default": "",
+      "Description": "可填 weixiwei / irritable / adorkable / normal / gentle / cold；留空就用 voice-presets.json 里 active 的那套"
+    },
+    {
+      "Key": "voiceChanceOverride",
+      "Name": "语音概率覆盖（0-100，-1=不覆盖）",
+      "Type": "number",
+      "Default": -1,
+      "Description": "-1 时用每套预设自带的 voiceChance；填 0~100 则统一按这个概率决定这条回语音还是文字（0 = 只在明确要语音时才发）"
+    },
+    {
+      "Key": "injectTagRules",
+      "Name": "把标签规范写进提示词",
+      "Type": "boolean",
+      "Default": true,
+      "Description": "往 system prompt 追加「只能用官方 34 个音频标签」的规则，减少模型自造 [撒娇] 这类标签"
+    }
+  ],
+  "ResultLabel": "语音预设",
+  "Api": 4,
+  "Kind": "message",
+  "Hooks": [
+    "chat.prompt",
+    "chat.before_send",
+    "chat.dispatched"
+  ],
+  "Permissions": [
+    "system.full"
+  ],
+  "ExecutionTimeoutMs": 20000,
+  "IntervalSeconds": 60
+}

@@ -1,83 +1,87 @@
 # 鲸鲸插件投稿规范
 
-## 当前能力：Api 4 / 最低 4.1.2
+本文件面向投稿作者和编码代理。协议以宿主仓库的 [插件协议](https://github.com/Banan1cee/whale_girl/blob/main/docs/插件协议.md) 为准，市场只负责目录、安装包、校验与检测。
 
-4.1.0 已发布；本轮 JavaScript API 4 最低版本为 4.1.2（发布状态查 Releases），不得声称旧客户端支持。
-开发完整权限插件读 `docs/api4.md`：`plugin.js` + `plugin.json`、独立 `index-v4.json`、`system.full` 明确授权，保留旧 Wasm。
-允许使用 Node.js 生态和主程序全部 API。此能力仅限用户明确信任的完整权限插件，不是安全沙箱。
-包更新直接覆盖代码、保留设置/状态/数据，撤回授权后重新启用；插件作者负责状态迁移。
-Api 4 和 Api 3 一样要求逐版本溯源；执行检测必须使用可信策略的隔离容器，不在带凭据的主机上直接运行。
-下面仅标 Api 3 的能力限制适用于旧 Wasm，不限制 Api 4。主程序修改仍须用户另行授权。
+## 1. 当前协议：whale-plugin/1
 
-## 分级安全检测
+- 五个等级：0 级纯数据主题（`theme.json` / `theme-data`）、1–3 级受限 Wasm（`plugin.wasm` / `wasm-restricted`）、4 级 Node（`plugin.js` / `node-full`）。
+- 安装包 ZIP 根目录只有 `plugin.json` 和该等级入口；`README.md`、`market.json`、源码、图片留在 `plugins/<id>/`，不打进 ZIP。
+- 清单必须写 `format: "whale-plugin/1"`、`level`、`id`、`entry`、`runtime`、`provides`；`id` 小写字母开头，只含小写字母、数字和短横线。
+- `provides` 的键必须是 `protocol.json` 里该等级允许的扩展点，`mode`/`scope` 必须合法；`task.tick@1` 还要写 `intervalSeconds`。
+- `calls` 是宿主能力白名单：4 级只能声明 `protocol.json` 中 4 级 `calls` 列出的能力；1–3 级 `calls` 必须为空。
+- 3 级可在清单写 `dataAccess`（`chat.history` / `model.prompt`），且必须同时声明 `chat.reply@1`；1–2 级不得声明。
+- 0 级必须 `provides: {}`、`calls: []`，不得声明 `settingsSchema` / `dataAccess`，`minAppVersion` 不低于 4.3.0。
+- `protocol.json` 是宿主 `pluginProtocolRegistry.json` 的副本，`_source` 记录来源仓库、提交与 sha256；等级、能力、schema 与大小限制都以它为准，升级协议时重新复制并更新 `_source`。
 
-- 投稿前读 `security/README.md`。人设包进入 `index-personas.json`，只含清单与纯数据，不执行插件代码。不能通过自报类型绕过文件白名单。
-- Api 3 每版本必须有 `provenance/<id>-<version>.json`，绑定 GitHub 发布主体数字 ID、源仓库、完整 commit 和目录；包必须托管于本市场且旧包不可覆盖。代交账号与源码发布主体分别记录，不能把账号核验称为现实实名认证。
-- `security.yml` 是可信上架门禁，仅 checkout base 的检查器；候选源码和安装脚本禁止执行。Api 3 调用固定 commit/哈希的真实宿主运行时，纯数据包不做动态执行。任何超时、回退、权限或文件检查失败均不通过。
-- 新流程先通过 `security-selftest`；默认分支合并后才有可信投稿门禁与正式签署。Wasm 检测使用 GitHub 托管 Ubuntu 完整 VM，Windows 启动器兼容性由主仓库 CI 验证。最终启用 main 必需检查前先确认检查已上报。检测器或工作流变更须维护者审核。
+大小限制：清单 ≤8 KiB；1–3 级 Wasm ≤512 KiB；4 级 `plugin.js` ≤8 MiB；0 级 `theme.json` ≤64 KiB；安装包 ≤16 MiB。
 
-## 给 DSH 和其他编码代理
+## 2. 目录与生成规则
 
-1. 收到「制作插件」「把功能做成插件」或「上架插件」时，先确认作者要支持的鲸鲸版本、对应插件 API 和已发布的宿主扩展点。可以只读查看主程序源码来核对接口。
-2. 所有插件实现放在独立插件源码目录。插件上架 PR 的目标必须是 **`Banan1cee/whale-girl-plugins:main`**。提交前核对 GitHub 的 base repository 和 base branch。插件任务期间禁止修改主程序文件、提交宿主补丁、推送主仓库分支，或向 `Banan1cee/whale_girl`（旧名 `whale_gril`）发 PR。
-3. 如果目标版本缺少必要的扩展点，暂停上架，保留可独立交付的源码和草稿。用一句话说明哪个功能被卡住，再列出缺少的扩展点、所需输入输出和权限、影响的版本。只有用户明确要求另做宿主改动，才单独开展宿主任务。宿主接口开发、发布和插件上架分别跟踪。
-4. 如果当前环境没有可用于投稿的 GitHub 登录，交付源码和安装包（`plugins/<id>/` 与 `packages/<id>-<version>.zip`），供作者或维护者代交；目录条目、下载地址和 SHA-256 由市场 CI 生成，不需要附目录补丁。用户仅要求制作插件时，交付本地成果。用户要求上架时，走市场 PR，由维护者审核合并。
+| 文件 | 内容 | 由谁生成 |
+| --- | --- | --- |
+| `index-personas.json` | 人设包 | `scripts/build-index.js` |
+| `index-v5.json` | whale-plugin/1 插件与 0 级主题 | `scripts/build-index.js` |
+| `index.json` / `index-v2.json` / `index-v3.json` / `index-v4.json` | 旧 Api 1–4 历史格式目录 | 历史条目，不再新增 |
 
-## 投稿前核对设置和文档
+`index-v5.json` 的条目形状是 `{ manifest, manifestSha256, package: { path, download, sha256, bytes }, display }`，下载地址固定在 `main/packages/<id>-<version>.zip`。
 
-- 功能插件应把用户需要调整的开关、阈值、触发条件等放在卡片「设置」。Api 3 从扩展点输入的 `settings` 读取，Api 4 从 `ctx.settings` 读取。插件代码要消费保存值，并为缺项、旧配置和无效值提供安全默认值或明确错误。
-- 在 `plugins/<id>/README.md` 写出每个字段的用途、默认值、类型与范围，以及一段可以直接复制到设置页的 JSON。可添加 `plugins/<id>/GUIDE.md` 作为独立教程。文件用 UTF-8 Markdown，各自不超过 64 KiB，随源码投稿。市场卡片按这两个路径读取文档，安装 ZIP 仍按原有文件清单打包。
-- 验证 `{}` 的默认行为，然后保存一个不同的值，用相同输入验证行为随之变化。PR 正文记录所改字段和观察结果。仅能做离线自测时，注明验证范围。不要把真实密钥、账号或个人路径写进示例。
-- 人格预设等纯数据包沿用预览与应用流程。功能确实无可调项时，在 README 说明固定行为和空设置的含义。
+**不要手改任何 `index*.json`。** 合并后由 `.github/workflows/index.yml` 在可信 base 上运行 `scripts/build-index.js` 生成目录；`validate-market` 用 `validate.py` 校验目录与包；`market-security` 按 `security/` 的规则检测。
 
-## 分享个人预设
+## 3. 投稿流程
 
-收到「分享我的人格预设」时，默认交付本地人设 ZIP。在支持人设包的鲸鲸版本上，ZIP 根目录放 `plugin.json` 和 `persona.json`，安装后从卡片启用，再到人格预设里查找。试装后可直接发给群友，对方用「插件市场 → 从本地安装」导入。这个流程无需账号或投稿。仅安装来源可信的 ZIP，应用前先预览提示词。打包前清掉真实姓名、聊天记录和密钥。
-
-如果作者明确要求公开上架，先检查公开目录是否支持该类型。需要投稿但作者没有 GitHub 账号时，作者可把材料发给愿意代交的维护者或协作者，由代交人操作 GitHub。
-
-## 功能和界面边界
-
-- 插件可以通过已发布的扩展点实现自己的完整业务流程。要替换鲸鲸的某段核心逻辑，目标版本必须已经提供允许替换该行为的扩展点。
-- 插件的配置、权限确认、预览、运行和结果统一放在「插件市场 → 已安装 → 插件卡片 → 设置」。插件不得在主工作台、状态栏、系统设置或托盘自行加入口。宿主可以通过已支持的接口展示插件内容，例如人格预设列表。
-- 禁止通过覆盖程序文件、替换 EXE、加载任意 DLL、运行安装脚本或绕过宿主权限取得能力。
-- `index.json` 只收 Api 1 工具。`index-v2.json` 只收 Api 2 工具，`HostAction` 可省略或为 `chat.summary`。消息汇总按次确认，插件只接收生成的汇总文本。新增目录须在同一 PR 接入市场 CI。
-
-## 上架步骤
-
-1. 按 [README 的打包规则](README.md#制作功能插件) 交付独立安装 ZIP。准备可审核的源码链接和构建步骤，列出插件 ID、版本、最低鲸鲸版本、所用 API 及权限。
-2. 用申报的最低兼容版本从本地安装 ZIP，验证启用、从卡片打开设置、运行、停用和卸载。需要授权时也测试拒绝。记录实测版本和结果。**没有对应客户端时**（例如新的 4.1.2 仍在发布前），改用 `node scripts/submit.js plugins/<id>` 的本地校验（打包 + 生成目录 + validate）代替，并在 PR 里注明「未 GUI 试装，已过本地校验」。
-3. PR 只提交两处：`plugins/<id>/plugin.json`（源码可放同目录）和 `packages/<id>-<version>.zip`。目录条目、下载地址和 SHA-256 由 `scripts/build-index.js` 在合并后自动生成，**不要手改 `index*.json`**（多人同时投稿也不会冲突）。更新时提升版本号并保留已发布的旧包。
-4. 只向 `Banan1cee/whale-girl-plugins:main` 提交上架 PR。PR 填写功能、源码、兼容版本、权限和试装结果。**上传通道现在就开放**：4.1 客户端尚未公开时也接收投稿，合并后条目立即进入目录，用户在装到支持该 Api 的客户端后就能看到并安装。因此 4.1 发布前允许先合并入库（先收录、后可用），但必须在 PR 里写明「所需客户端版本」；有正式客户端后补一条用同一份 ZIP 的试装记录即可。Api 3 仍须过 `security.yml` 检测。
-
-## 一句话上架（小白 + agent）
-
-用户说「做个 X 插件，上架」时，agent 按这四步做完，不要让用户自己敲命令：
-
-1. **写插件**：复制 `examples/api3-echo` 到 `plugins/<id>/`，改 `plugin.json` 的 Id、Name、Author、Version；业务逻辑改 `src/build.js` 的参数或 `src/wasm.js`。
-2. **本地自检**（不需要鲸鲸客户端）：
+1. 源码放 `plugins/<id>/`：`plugin.json` + 该等级入口；可加 `README.md`（≤64 KiB）、`GUIDE.md`、`market.json`、PNG/JPG/GIF 图片（≤8 张，单张 ≤2 MiB）。
+2. 自检：
 
    ```bash
-   node scripts/submit.js plugins/<id>                            # 打包 + 生成目录 + validate
-   node scripts/provenance.js plugins/<id> --login <GitHub 名>     # Api 3 必需；设 GITHUB_TOKEN 可自动取数字 ID
+   node scripts/package.js plugins/<id>       # 生成 packages/<id>-<version>.zip，只含清单与入口
+   node scripts/submit.js plugins/<id>        # 打包 + 生成目录副本 + 跑 validate.py
+   python validate.py                         # 全仓目录与包校验
    ```
 
-3. **提 PR**：fork → 推分支 → PR 到 `Banan1cee/whale-girl-plugins:main`。只提交 `plugins/<id>/`、`packages/<id>-<version>.zip`、`provenance/<id>-<version>.json`（Api 3）。
-   - 首次贡献者的 PR 需要维护者点一次「Approve and run workflows」，CI 才会跑，属正常，不是失败。
-4. **做不到的两件事要如实告诉用户**：合并必须由维护者点；4.1 正式客户端未发布时无法 GUI 试装，在 PR 里注明「未 GUI 试装，已过本地校验」即可先入库。
+3. PR 只提交 `plugins/<id>/` 与 `packages/<id>-<version>.zip`，目标固定 `Banan1cee/whale-girl-plugins:main`；目录条目、下载地址和 SHA-256 由 CI 生成。
+4. 同一 ID 更新提高 `Version`、作者不变；已发布的同版本 ZIP 不可覆盖，撤回只移除目录条目。
+5. 没有可用客户端做安装自测时，在 PR 里写清自测范围（例如只跑了 `package.js`、`validate.py`），不要写成已验证客户端行为。
 
-不要手改 `index*.json`，不要给宿主仓库发 PR，不要签名（签名为可选项）。脚本都容忍 Windows 的 UTF-8 BOM；`package.js` 拒绝覆盖已发布的同版本包，升级请先改 Version。
+旧 Api 3/4 的投稿仍按历史流程带 `provenance/<id>-<version>.json`；whale-plugin/1 不需要溯源文件，也不需要作者签名——目录与包的完整性由 CI 生成的 SHA-256 保证。
 
-## 可以直接复制给 DSH
+## 4. 人设包
 
-> 按鲸鲸插件市场的 AGENTS.md 制作并上架这个功能。把实现放在独立插件里，所有配置和操作放在插件卡片的「设置」。交付 README 中可复制的设置 JSON，验证保存不同值确实改变行为。先核对目标版本支持的接口，再交付源码、可独立安装的 ZIP 和测试结果（目录与 SHA-256 由市场 CI 生成，不用手改 `index*.json`）。上架 PR 只发到 Banan1cee/whale-girl-plugins 的 main。缺宿主接口就停在插件草稿并列出缺口，未经我另行明确授权，不改鲸鲸主程序，也不给主仓库发 PR。
+人设包是纯数据，走 `index-personas.json`，不属于 whale-plugin/1 的等级体系：`plugin.json` 写 `Api: 1`、`Kind: "persona"`，`persona.json` 只允许 `customPrompt`（正文 1–24000 字，文件 ≤64 KiB），ZIP 根目录只有这两个文件。人设包不执行代码、不需要授权、不做动态检测；作者也可以直接把 ZIP 发给别人，用启动器「从本地安装」导入。
 
-## Api 3 消息插件开发版
+## 5. 设置、文档与展示
 
-鲸鲸 4.1.0 支持 Api 3，清单 Kind 填 message。它提供 chat.received、chat.pre_reply、chat.prompt、chat.generate、chat.reply、chat.before_send 和 chat.dispatched 七个扩展点，插件可保存独立会话状态。
+- 用户可调的开关、阈值、触发条件放在插件卡片「设置」，用 `settingsSchema` 描述类型与范围；插件代码要消费保存值，并为缺项、旧配置和无效值提供安全默认值或明确错误。
+- `plugins/<id>/README.md` 写清每个字段的用途、默认值、类型与范围，以及可直接复制的设置 JSON；`GUIDE.md` 可作为独立教程。
+- `plugins/<id>/market.json` 只接受 `readme`、`images`、`donation`：`readme` 默认 `README.md`；`images` 最多 8 张；`donation` 只接受爱发电个人主页链接。更新时间由生成器从 Git 提交时间推导，作者不能手写。
+- 插件不得在主工作台、状态栏、系统设置或托盘自行加入口；配置、权限确认、预览、运行和结果统一在「插件市场 → 已安装 → 设置」。
 
-所有配置和操作仍放在插件卡片的「设置」。启用时确认持续参与消息处理，停用撤销授权，更新后重新启用。chat.history 和 model.prompt 分别声明，分别允许读取最近 12 条会话消息及读取、替换本轮系统提示词。
+## 6. 检测、不可变性与发布证据
 
-使用具备这些接口的 4.1.0 正式版或更新版本试装；JavaScript Api 4 最低 4.1.2，不能误装旧版。`index-v3.json` 由 `scripts/build-index.js` 从 `plugins/` 自动生成，对应 CI 已随 `index.yml` 一起上线。当前不能往 `index.json` 或 `index-v2.json` 混入 Api 3 条目。
+- `security.yml` 使用 `pull_request_target`，只 checkout 可信 base 的检查器；候选分支只作为数据读取，候选源码、构建脚本和自带测试都不执行。
+- 静态检查覆盖清单、实际包内容、ZIP 白名单、大小、符号链接、重复 JSON 键与 SHA-256；声明与包内容不符即失败。
+- 4 级需要完整系统权限，检测在固定镜像、固定宿主版本、无网络、无凭据、只读挂载和资源限制下运行；检测通过不代表代码无害。
+- `security-selftest.yml` 验证检测流程本身；正式门禁与 attestation 以 `security.yml` 在默认分支的运行结果为准。
+- 已发布的包不可变：不覆盖、不删除、不改目录里已绑定的哈希；需要修复时发新版本，撤回只移除目录条目。
+- 检测器与工作流变更须维护者审核；不得在可信流程里执行候选源码或构建脚本。
 
-上述 Api 3 Wasm 不提供定时、网络和主动发送；需要这些能力时使用 Api 4。chat.dispatched 表示网关提交结果，不能据此声称微信已经送达。完整输入输出协议见宿主仓库的 docs/插件消息流程Api3.md。
+## 7. 历史格式：Api 1–4
+
+以下内容保留给历史版本与旧条目追溯，新投稿不再使用这些格式：
+
+- **Api 1/2**：`index.json` / `index-v2.json`；Api 1 工具只能读取用户在该工具页面输入的文字，Wasm 没有联网、读取微信或代发消息接口；Api 2 支持 UTF-8 文本输出，可声明 `HostAction: chat.summary`。
+- **Api 3**：`index-v3.json`，`Kind: message`，七个消息扩展点（`chat.received`、`chat.pre_reply`、`chat.prompt`、`chat.generate`、`chat.reply`、`chat.before_send`、`chat.dispatched`）。启用时确认持续参与消息处理，停用撤销授权，更新后重新启用；`chat.history` 与 `model.prompt` 分别声明、分别允许读取最近 12 条会话消息与读取/替换本轮系统提示词。每版本需要 `provenance/<id>-<version>.json`，并通过 `security.yml` 的检测。`chat.dispatched` 只是网关提交结果，不能据此声称微信已经送达。
+- **Api 4**：`index-v4.json`，`plugin.js` + `system.full` 完整系统权限，说明见 [docs/api4.md](docs/api4.md)；逐版本溯源规则沿用。
+
+旧目录不再产生新条目，也不再接收同 ID 的新版本。
+
+## 8. 给 DSH 和其他编码代理
+
+1. 收到「制作插件」「把功能做成插件」或「上架插件」时，先确认作者要支持的鲸鲸版本与 `protocol.json` 里已发布的扩展点；可以只读查看宿主源码核对接口。
+2. 所有实现放在 `plugins/<id>/`；上架 PR 只发 `Banan1cee/whale-girl-plugins:main`，提交前核对 base repository 与 base branch。不得改宿主程序、给宿主仓库开 PR 或推送宿主分支。
+3. 目标版本缺少所需扩展点时，暂停上架，保留可独立交付的源码与草稿，列出缺少的扩展点、输入输出需求和受影响版本；只有用户明确要求时才另开宿主任务。
+4. 没有可用于投稿的 GitHub 登录时，交付 `plugins/<id>/` 与 `packages/<id>-<version>.zip` 供代交；目录条目、下载地址与 SHA-256 由 CI 生成，不需要附目录补丁。
+5. 用户只要求制作插件时，交付源码与安装包并说明验证范围即可，不必强行投稿。
+
+## 9. 可以直接复制给 DSH
+
+> 按鲸鲸插件市场的 AGENTS.md 制作并上架这个功能。把实现放在独立插件里，清单用 `whale-plugin/1`，所有配置和操作放在插件卡片的「设置」。交付 README 中可复制的设置 JSON，验证保存另一个值确实改变行为。先核对 `protocol.json` 支持的扩展点，再交付源码、可独立安装的 ZIP 和测试结果（目录与 SHA-256 由市场 CI 生成，不手改 `index*.json`）。上架 PR 只发到 Banan1cee/whale-girl-plugins 的 main。缺宿主接口就停在插件草稿并列出缺口；未经我另行明确授权，不改鲸鲸主程序，也不给主仓库发 PR。

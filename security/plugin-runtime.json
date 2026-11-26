@@ -1,0 +1,55 @@
+{
+  "format": "whale-plugin-runtime-pin/1",
+  "purpose": "Pinned host runtime used only by the credential-less isolation job. Files are fetched read-only at this commit and verified by SHA-256 before use; the container adapter re-hashes them inside the image before running.",
+  "repository": "Banan1cee/whale_girl",
+  "branch": "feat/4.3",
+  "commit": "a450d05c7e568442542511644a6aebbc35642990",
+  "commit_note": "Published remote commit. Never pin local, unpushed merge commits here. This commit predates the current 13-provider/state ABI, so harness.state stays pending until a maintainer re-pins and verifies.",
+  "protocol": "whale-plugin/1",
+  "image": "node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54",
+  "container": {
+    "network": "none",
+    "read_only_root": true,
+    "user": "65534:65534",
+    "cap_drop": ["ALL"],
+    "no_new_privileges": true,
+    "pids_limit": 64,
+    "memory": "256m",
+    "cpus": "0.5",
+    "tmpfs": "/tmp:rw,noexec,nosuid,size=16m"
+  },
+  "files": {
+    "package.json": "82db37629ac03acf993f993b3a3e0d422180e0bad1c1109235c45ec7c848b207",
+    "src/services/capabilitySchema.js": "727877de992f7bc688786fea4a0e5c4d3e4b486ef670b249941a93c173797468",
+    "src/services/pluginProtocol.js": "42ba457f703504bcedd3bfe98aa592f0af57528148bd6edd3d1630c009b5cdc8",
+    "src/services/pluginProtocolRegistry.json": "d6db39c6c02f82563a9bd5617bcafab40475afdc93d8e221d4a44449f2c7d29c",
+    "src/services/unifiedPluginRuntime.js": "3f0d70c8a4a3153a0eb5d325bab3ec0d1ffe2b18c49e7d310401bc250bbe2203",
+    "src/services/unifiedPluginWorker.js": "af86decc0d2a605111e79ffa099f2431dbed2364c2fac093fda5b1e08ad487c1",
+    "src/services/unifiedWasm.js": "9b6f8c7ac24f08a870ac627bc4cf5d6dae9be0a2795d95421317de4a09140dc2",
+    "src/services/unifiedWasmWorker.js": "dbae0c0223c00589ed1e8a52bfb386ddb39eb239565a822a4d29762675c7c4d7"
+  },
+  "harness": {
+    "state": "pending",
+    "adapter": "security/harness/run.cjs",
+    "adapter_sha256": "e2688db23e6435c9904306ac9538492b40942e50ae62eccd89622331d61f2223",
+    "required_files": [
+      "src/services/capabilitySchema.js",
+      "src/services/pluginProtocol.js",
+      "src/services/pluginProtocolRegistry.json",
+      "src/services/unifiedCapabilityDispatcher.js",
+      "src/services/unifiedPluginRuntime.js",
+      "src/services/unifiedPluginWorker.js",
+      "src/services/unifiedWasm.js",
+      "src/services/unifiedWasmWorker.js"
+    ],
+    "reason": "PENDING_BINDING: the pinned host commit a450d05 predates the current 13-provider/state ABI and its file list does not include unifiedCapabilityDispatcher.js, so the adapter cannot prove it is driving the current runtime. The adapter is implemented and host-self-tested with synthetic fixtures, but it has not been executed inside this fixed image. A maintainer must re-pin a commit that contains all harness.required_files, run the isolation job successfully, then flip state to verified. Level 1-4 isolation fails closed until then; static/themes never need this pin.",
+    "verified_at": null,
+    "verified_by": null
+  },
+  "verification": {
+    "file_hashes": "sha256 of blob bytes at commit a450d05, read with git show; no runtime code was executed to produce this pin.",
+    "image_digest": "fixed OCI digest; the gate refuses tag-only images and runs with --pull=never so it never downloads an unpinned image.",
+    "harness_result_binding": "One stdout line is HMAC-signed with a per-run stdin secret known to isolated.py and the adapter; the worker environment is a fixed minimal set. This binds output to one run and detects tampering/mixups, but it is not a complete adversarial isolation claim: candidate and adapter run under the same non-root uid. The host independently rechecks package/runtime hashes and revalidates every provider output schema (outputJson + outputSha256) from the pinned registry.",
+    "does_not_prove": "A pass means the declared providers ran inside the constrained container with the pinned runtime. It is not an antivirus result and does not prove the plugin harmless."
+  }
+}

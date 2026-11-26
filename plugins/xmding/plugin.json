@@ -1,15 +1,24 @@
 {
-  "Id": "xmding",
-  "Name": "小咪叮",
-  "Author": "atroy",
-  "Version": "1.1.1",
-  "MinAppVersion": "4.1.2",
-  "appEpoch": 1,
-  "Description": "按群名 / 人名 / 备注 / wxid 或会话 ID，向指定群聊或个人主动发消息，支持文字、语音与图片，支持 dryRun 预检和投递回执查询；v1.1.1 起内置独立监听转发，可绕过宿主插件接口的仅本机限制。",
-  "ResultLabel": "发送结果",
-  "Api": 4,
-  "Kind": "tool",
-  "Hooks": ["tool.run", "app.start", "app.stop", "timer.tick"],
-  "Permissions": ["system.full"],
-  "ExecutionTimeoutMs": 45000
+  "format": "whale-plugin/1",
+  "level": 4,
+  "id": "xmding",
+  "name": "小咪叮（4 级）",
+  "author": "atroy",
+  "version": "2.0.2",
+  "minAppVersion": "4.3.0",
+  "description": "按会话 ID 或联系人名称发送文字或语音意图，支持 dryRun 与联系人搜索；新协议不再支持图片、回执查询和独立监听转发。",
+  "entry": "plugin.js",
+  "runtime": "node-full",
+  "provides": {
+    "tool.run@1": { "mode": "tool", "scope": "manual" }
+  },
+  "calls": ["contacts.list@1", "message.send@1"],
+  "settingsSchema": {
+    "type": "object",
+    "properties": {
+      "keepNewline": { "type": "boolean", "title": "保留换行", "description": "旧版默认把换行替换成 VT 以绕过旧发送器；新协议不保证该行为，默认原样发送。" }
+    },
+    "additionalProperties": false
+  },
+  "executionTimeoutMs": 45000
 }

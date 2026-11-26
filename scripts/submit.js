@@ -93,19 +93,26 @@ function main(argv) {
     fs.rmSync(temp, { recursive: true, force: true });
   }
 
-  const zip = `packages/${manifest.Id}-${manifest.Version}.zip`;
-  const extra = [3, 4].includes(manifest.Api) ? ` provenance/${manifest.Id}-${manifest.Version}.json` : '';
+  const unified = manifest.format === 'whale-plugin/1';
+  const id = unified ? manifest.id : manifest.Id;
+  const version = unified ? manifest.version : manifest.Version;
+  const name = unified ? manifest.name : manifest.Name;
+  const minVersion = unified ? manifest.minAppVersion : manifest.MinAppVersion;
+  const zip = `packages/${id}-${version}.zip`;
+  // whale-plugin/1 不要求旧 Api 的 provenance；其余 Api 3/4 仍按旧流程。
+  const extra = !unified && [3, 4].includes(manifest.Api) ? ` provenance/${id}-${version}.json` : '';
   console.log(`
-本地自检通过。下一步（只提交这三类路径，别改 index*.json）：
-
-  git checkout -b plugin/${manifest.Id}
-  git add ${path.posix.join('plugins', manifest.Id)} ${zip}${extra}
-  git commit -m "plugin: ${manifest.Name} ${manifest.Version}"
+本地自检通过。下一步（只提交插件目录和 ZIP，别改 index*.json）：
+${unified ? '\n  说明：whale-plugin/1 会由 scripts/build-index.js 生成 index-v5.json；' +
+    'README/market.json/图片只随源码提交，不进安装 ZIP。\n' : ''}
+  git checkout -b plugin/${id}
+  git add ${path.posix.join('plugins', id)} ${zip}${extra}
+  git commit -m "plugin: ${name} ${version}"
   gh repo fork Banan1cee/whale-girl-plugins --clone=false
-  git push -u <你的 GitHub 用户名> plugin/${manifest.Id}
+  git push -u <你的 GitHub 用户名> plugin/${id}
   gh pr create --repo Banan1cee/whale-girl-plugins --base main \\
-    --title "plugin: ${manifest.Name} ${manifest.Version}" \\
-    --body "功能：…；所需客户端版本：${manifest.MinAppVersion}；本地校验：submit.js 通过"
+    --title "plugin: ${name} ${version}" \\
+    --body "功能：…；所需客户端版本：${minVersion}；本地校验：submit.js 通过"
 `);
   return 0;
 }

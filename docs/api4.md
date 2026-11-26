@@ -1,6 +1,8 @@
 # JavaScript 完整权限插件（Api 4）
 
-最低客户端 **4.1.2**，不能装到 4.1.0/4.1.1。具体是否已发布，以鲸鲸 GitHub Releases 为准。
+> **历史说明**：本文描述旧的 JavaScript Api 4（`plugin.js` + `index-v4.json`，最低鲸鲸 4.1.2）。新投稿请使用 `whale-plugin/1`（4 级 Node，`node-full`），见 [仓库说明](../README.md) 与 [投稿规范](../AGENTS.md)。
+
+最低客户端 **4.1.2**，不能装到 4.1.0/4.1.1。客户端版本以鲸鲸 GitHub Releases 为准。
 旧 Wasm 目录、权限与预算保持原样。Api 4 单独进入 `index-v4.json`。
 
 完整协议与示例见主仓库 [JavaScript API 4](https://github.com/Banan1cee/whale_girl/blob/main/docs/插件JavaScriptApi4.md)。
@@ -19,7 +21,7 @@
 
 1. 源码放 `plugins/<id>/`，清单声明 Api 4、MinAppVersion >= 4.1.2、Hooks 和 system.full。
 2. `node scripts/submit.js plugins/<id>` 打包和校验，另生成 `provenance/<id>-<version>.json`，绑定发布账号数字 ID 和固定源码 commit。
-3. PR 只提交源码、固定版本 ZIP、溯源文件；目录和 SHA-256 自动生成。首次流程更改合并后，默认分支门禁才会使用新策略。
+3. PR 只提交源码、固定版本 ZIP、溯源文件；目录和 SHA-256 自动生成。门禁以默认分支上的检查器为准。
 4. 有正式客户端后验证启用/拒绝、设置、运行、停用、更新保留状态、卸载；缺正式客户端时明确注明未 GUI 试装。
 
 市场静态校验声明、包内容、格式、大小、来源和哈希；Api 4 兼容性测试只在临时 Docker 容器中运行，

@@ -1,22 +1,107 @@
 {
-  "Id": "ruiping",
-  "Name": "锐评",
-  "Author": "Peelorange233",
-  "Version": "1.1.0",
-  "MinAppVersion": "4.1.6",
-  "Description": "【安装前必读】先在「插件市场」页顶部打开「启用 JavaScript 插件（实验性，完整系统权限）」总开关，再「插件市场 → 从本地安装」本 ZIP 并确认 system.full 授权；不开总开关插件不会被加载。需鲸鲸 4.1.6 或以上。搜索 API：在「设置 → API 接入 → 搜索」打开总开关并添加 DeepSeek / 知乎（可选）；不开也能用，走本地 Bing/360。用法：私聊或 @ 机器人说「锐评一下昨天湖人输球」，插件先联网检索事实，再用一句金句或暴论锐评真实事件/结果；来源标注 DeepSeek/知乎/本地，知乎按观点、不当事实；数字与资料对不上会被删，证据不足直接说「不锐评」。卡片「设置 → 运行一次」输入事件可看 JSON。设置项都在卡片「设置」的 JSON 里，留空 {} 即默认。不发消息、不写聊天记录、不改宿主配置；每次锐评消耗一次联网检索和一次模型调用。",
-  "ResultLabel": "锐评结果",
-  "Api": 4,
-  "Kind": "message",
-  "Hooks": [
-    "chat.search",
-    "chat.pre_reply",
-    "chat.generate",
-    "tool.run"
-  ],
-  "Permissions": [
-    "system.full"
-  ],
-  "ExecutionTimeoutMs": 90000,
-  "IntervalSeconds": 60
+  "format": "whale-plugin/1",
+  "level": 4,
+  "id": "ruiping",
+  "name": "锐评",
+  "author": "Peelorange233",
+  "version": "2.0.2",
+  "minAppVersion": "4.3.0",
+  "description": "先检索事实，再用金句或暴论锐评真实事件；4 级 Node 插件。新协议不再提供搜索渠道/attempts/dateFilter/thinking 元数据，chat.search 与 chat.generate 的 replace 为独占模式；生成失败无法交回宿主，详见 README。",
+  "entry": "plugin.js",
+  "runtime": "node-full",
+  "provides": {
+    "chat.search@1": { "mode": "replace", "scope": "all" },
+    "chat.pre_reply@1": { "mode": "gate", "scope": "all" },
+    "chat.generate@1": { "mode": "replace", "scope": "all" },
+    "tool.run@1": { "mode": "tool", "scope": "manual" }
+  },
+  "calls": ["search.query@1", "model.complete@1"],
+  "settingsSchema": {
+    "type": "object",
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": ["金句", "暴论"],
+        "title": "锐评模式",
+        "description": "金句偏短句结论；暴论偏强判断。"
+      },
+      "maxChars": {
+        "type": "integer",
+        "minimum": 12,
+        "maximum": 120,
+        "title": "正文上限",
+        "description": "锐评正文最多多少个汉字。"
+      },
+      "facts": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4,
+        "title": "事实条数",
+        "description": "最多保留几条经核对的事实。"
+      },
+      "minItems": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6,
+        "title": "最少资料条数",
+        "description": "检索结果少于此数时不锐评。"
+      },
+      "freshness": {
+        "type": "string",
+        "enum": ["", "today", "yesterday", "week", "month", "year"],
+        "title": "时效",
+        "description": "搜索时效；空字符串表示不限定。"
+      },
+      "timeZone": {
+        "type": "string",
+        "maxLength": 64,
+        "title": "时区",
+        "description": "解析昨天/今天等日期时使用的 IANA 时区。"
+      },
+      "inChat": {
+        "type": "boolean",
+        "title": "聊天内启用",
+        "description": "关闭后聊天搜索/生成/前置闸都不处理，只保留手动工具。"
+      },
+      "wake": {
+        "type": "boolean",
+        "title": "未被点名也接话",
+        "description": "群聊未被 @ 时，命中锐评关键词由前置闸返回 wake。"
+      },
+      "showSources": {
+        "type": "boolean",
+        "title": "显示来源",
+        "description": "在回复末尾附来源标题与链接。"
+      },
+      "evidenceItems": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 8,
+        "title": "证据条数",
+        "description": "生成时最多取几条检索结果作为证据。"
+      },
+      "searchTimeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 30000,
+        "title": "检索超时",
+        "description": "单次 search.query@1 的超时时间（毫秒）。"
+      },
+      "modelMaxTokens": {
+        "type": "integer",
+        "minimum": 100,
+        "maximum": 4000,
+        "title": "模型 token 上限",
+        "description": "单次 model.complete@1 的 maxTokens。"
+      },
+      "keywords": {
+        "type": "string",
+        "maxLength": 200,
+        "title": "触发关键词",
+        "description": "逗号或空白分隔，默认锐评、暴论。"
+      }
+    },
+    "additionalProperties": false
+  },
+  "executionTimeoutMs": 90000
 }

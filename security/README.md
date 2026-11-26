@@ -23,6 +23,8 @@ Api 4（JavaScript，最低鲸鲸 4.1.2）进入独立目录，逐版本溯源�
 
 Api 3 在 GitHub 托管的 Ubuntu 完整虚拟机内，用固定 commit 与 SHA-256 的鲸鲸真实 `MessagePlugins` 运行时执行。Wasm 字节接口可跨平台模拟，不需要启动微信；Windows 启动器兼容性仍由宿主仓库的 Windows CI 验证。逐个声明的 hook 输入空消息、普通消息、注入式消息和长消息，覆盖群私聊模拟、状态解析、停用和授权哈希篡改。未知 Wasm imports、超时、非法输出、未授权输出及宿主错误回退均判失败。最长单次 300ms（含宿主 worker 启动）；整个外层进程另有 35 秒上限。
 
+`whale-plugin/1` 的 level 1-4 隔离使用固定 digest 镜像、无网络、只读根、非 root 和固定宿主运行时；适配器 `security/harness/run.cjs` 会调用清单声明的每个 provider，并校验 schema、超时、取消与授权撤销。当前固定 pin 仍是 `pending`（早于 13 provider/state ABI，且缺少 Dispatcher 哈希），所以可执行等级会 fail closed；0 级主题/纯静态投稿不依赖该 pin。完成重新 pin 并在固定镜像内成功验证后，才会改为 `verified`。详见 [GATE.md](GATE.md)。
+
 只提供宿主的输入/输出字节接口，不提供 WASI、网络、文件或进程接口。不接真实微信、不传真实聊天或 API Key。检测进程环境不传 GitHub Token；真实源码、构建脚本和插件自带测试均不执行。它是受限运行时测试，不是完整杀毒软件，也没有系统调用级监控或真实微信全流程测试。延迟触发、特定输入、社会工程及引擎漏洞仍可能漏检。
 
 每份报告绑定包 SHA-256、提交版本、发布账号数字 ID、源码 commit、宿主 commit、检测时间和 Actions 运行地址。普通 PR 只提供未签署的预览；默认分支成功检测后，在另一独立任务使用 GitHub OIDC 为实际测试的 ZIP 和报告生成 artifact attestations，不需要团队维护私钥。

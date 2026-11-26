@@ -1,19 +1,62 @@
 {
-  "Id": "whale-dsh-bridge",
-  "Name": "DSH 桥接",
-  "Author": "LFrs-Cyberpunk",
-  "Version": "1.0.0",
-  "MinAppVersion": "4.1.2",
-  "Description": "把微信消息转给本机的 DSH 来回答，回复由 DSH 生成，DSH 里装的插件微信这边也能用。所有设置都在插件卡片的「设置」里；DSH 没连上、或这一轮没答出来时，自动退回鲸鲸自己的回复方式，不会不回消息。",
-  "ResultLabel": "回复",
-  "Api": 4,
-  "Kind": "message",
-  "Hooks": [
-    "chat.prompt",
-    "chat.generate"
+  "format": "whale-plugin/1",
+  "level": 4,
+  "id": "whale-dsh-bridge",
+  "name": "DSH 桥接",
+  "author": "LFrs-Cyberpunk",
+  "version": "2.0.2",
+  "minAppVersion": "4.3.0",
+  "description": "把本轮回复转给本机 DSH 生成；未连通、无文本或出错时自动交回鲸鲸原模型，不会不回消息。人设默认使用鲸鲸本轮 system；只访问设置里的 DSH 地址，失败原因写到插件数据目录便于排查。",
+  "entry": "plugin.js",
+  "runtime": "node-full",
+  "executionTimeoutMs": 60000,
+  "provides": {
+    "chat.generate@1": {
+      "mode": "replace",
+      "scope": "all"
+    }
+  },
+  "calls": [
+    "model.complete@1"
   ],
-  "Permissions": [
-    "system.full"
-  ],
-  "ExecutionTimeoutMs": 60000
+  "settingsSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "url": {
+        "type": "string",
+        "maxLength": 500,
+        "title": "DSH 地址",
+        "description": "默认 http://127.0.0.1:57321；只把消息发到这个地址"
+      },
+      "token": {
+        "type": "string",
+        "maxLength": 500,
+        "title": "桥接令牌",
+        "description": "DSH 侧要求的 Bearer token；为空时不转发"
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 55000,
+        "title": "超时",
+        "description": "毫秒，默认 40000"
+      },
+      "enabled": {
+        "type": "boolean",
+        "title": "启用桥接",
+        "description": "关闭时全部交回鲸鲸原模型"
+      },
+      "personaSource": {
+        "type": "string",
+        "maxLength": 40,
+        "title": "人设来源",
+        "description": "whale=使用本轮 system；custom=由 DSH 侧决定"
+      }
+    }
+  },
+  "dataAccess": [
+    "model.prompt",
+    "chat.history"
+  ]
 }

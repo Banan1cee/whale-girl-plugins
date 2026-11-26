@@ -1,94 +1,126 @@
 # 鲸鲸插件市场
 
-## JavaScript 插件 API 4
+本仓库维护鲸鲸启动器的插件目录与安装包：人设包走 `index-personas.json`，`whale-plugin/1` 插件走 `index-v5.json`。目录条目、下载地址和 SHA-256 由 CI 从 `plugins/` 与 `packages/` 生成，投稿只提交源码和固定版本的 ZIP。
 
-新版完整权限插件最低鲸鲸 4.1.2，支持 Node.js 生态与全部主程序 API，保留 Wasm 插件。
-默认关闭，逐个确认完整系统权限；同 ID 和作者升版直接更新并保留设置/数据，更新后重新启用。
-开发、打包、投稿及安全边界见 [Api 4 指南](docs/api4.md) 与 [搜索示例](examples/api4-search/plugin.js)。
-实际客户端发布状态以 GitHub Releases 为准，不能把新接口当成旧 4.1.0 的能力。
+## 1. 仓库里有什么
 
-鲸鲸启动器从 `index.json` 读取 Api 1 工具，兼容的客户端从 `index-v2.json` 读取 Api 2 工具，Api 3 消息插件走 `index-v3.json`。
+| 文件                                                                 | 内容                                                      |
+| ------------------------------------------------------------------ | ------------------------------------------------------- |
+| `index-personas.json`                                              | 人设包（`plugin.json` + `persona.json`，纯数据，不执行代码）           |
+| `index-v5.json`                                                    | `whale-plugin/1` 插件目录，包含 0 级主题与 1–4 级可执行插件              |
+| `index.json` / `index-v2.json` / `index-v3.json` / `index-v4.json` | 旧 Api 1–4 的历史格式目录，不再接收新投稿                               |
+| `packages/<id>-<version>.zip`                                      | 安装包，按版本不可覆盖                                             |
+| `plugins/<id>/`                                                    | 作者源码与展示资料（`plugin.json`、入口、README、可选 `market.json` 与图片） |
+| `protocol.json`                                                    | 宿主注册表副本，`_source` 记录来源仓库、提交与 sha256                     |
+| `validate.py`                                                      | 目录与安装包的静态校验器，`index-v5.json` 也在校验范围内                    |
+| `security/`                                                        | 分级检测、隔离运行与溯源工具                                          |
 
-**上传通道现在开放**：任何作者都可以按本仓库流程投稿，4.1 客户端正式发布前也先收录。条目、下载地址和 SHA-256 由 CI 自动生成，不需要手改目录、不需要签名。
+`index-v5.json` 由 `scripts/build-index.js` 从 `plugins/` 和 `packages/` 生成，任何人都不手改目录文件。
 
-## 新手入口：先看这五样
+## 2. whale-plugin/1：等级与包结构
+
+| 等级 | 入口 | 运行时 | 能做什么 | 授权 |
+| --- | --- | --- | --- | --- |
+| 0 | `theme.json` | `theme-data` | 纯数据主题，只改启动器外观，没有执行体 | 无 |
+| 1 | `plugin.wasm` | `wasm-restricted` | 手动整数工具 `tool.run@1` | 无 |
+| 2 | `plugin.wasm` | `wasm-restricted` | 手动文本工具 `tool.run@1` | 无 |
+| 3 | `plugin.wasm` | `wasm-restricted` | 文本工具 + 回复草稿增强，可申请当前聊天最近 12 条或系统提示词 | 启用时确认聊天访问 |
+| 4 | `plugin.js` | `node-full` | 现有扩展点 + 清单声明的宿主能力 `calls` | 启用时确认完整系统权限 |
+
+- 安装包 ZIP 根目录只有 `plugin.json` 和该等级的一个入口文件；README、源码、密钥、图片都留在 `plugins/<id>/`，不打进 ZIP。
+- 清单必须写 `format: "whale-plugin/1"`、`level`、`id`、`entry`、`runtime`、`provides`；4 级的 `calls` 只能取 `protocol.json` 里 4 级白名单内的能力，1–3 级 `calls` 必须为空。
+- `protocol.json` 是宿主 `pluginProtocolRegistry.json` 的副本，等级、能力、模式/作用域、输入输出 schema 和大小限制都以它为准；升级协议时重新复制并更新 `_source`。
+- 0 级主题只描述颜色、字体、间距与圆角，不描述布局、页面或行为；1–3 级是受限 Wasm，没有网络、文件、进程能力；4 级以当前 Windows 用户身份运行，不是沙箱。
+
+## 3. 作者流程
+
+源码目录：
+
+```text
+plugins/<id>/
+  plugin.json          # 清单
+  theme.json           # 0 级入口；1–3 级是 plugin.wasm；4 级是 plugin.js
+  README.md            # 可选，卡片展示用，不进 ZIP
+  market.json          # 可选展示元数据，不进 ZIP
+  preview.png          # 可选配图，最多 8 张，单张不超过 2 MiB，不进 ZIP
+```
+
+四步交付：
+
+```bash
+node scripts/package.js plugins/<id>          # 只把清单和入口打进 packages/<id>-<version>.zip，打印 SHA-256
+node scripts/submit.js plugins/<id>           # 打包 + 在临时副本里生成目录 + 跑 validate.py
+node scripts/build-index.js --out <目录>      # 本地预览生成的目录：写到指定目录，不动工作区
+node scripts/build-index.js --check           # 只比对不写文件：目录与 plugins/ + packages/ 同步则打印「目录已和源码同步。」并退出 0
+python validate.py                            # 校验整个仓库的目录与包
+```
+
+`--check` 是改完 `plugins/` 或 `packages/` 之后的本地自查：它按源码重算目录条目，逐个比对已提交的 `index*.json`，漂移时列出不一致的文件名并退出 1，不会替你重生成。CI 不用 `--check`——`.github/workflows/index.yml` 用可信 base 的 `build-index.js` 在临时副本里**重新生成**目录再跑 `validate.py`，main 上则由 `sync-catalog` 把生成结果自动提交回仓库。
+
+投稿 PR 只提交两处：`plugins/<id>/`（含源码与展示资料）和 `packages/<id>-<version>.zip`。不要手改 `index*.json`，不要自己填下载地址或哈希；目录条目由 CI 生成。
+
+合并后由 `.github/workflows/index.yml` 运行 `scripts/build-index.js` 生成 `index-v5.json`，`validate-market` 用 `validate.py` 校验目录与包，`market-security` 按 `security/` 的规则做检测并产出报告与 attestation。
+
+### 人设包（纯数据，当前仍在使用）
+
+人设包不走 whale-plugin/1 的等级体系：`plugins/<id>/plugin.json` 写 `Api: 1`、`Kind: "persona"`，加一份只含 `customPrompt` 正文的 `persona.json`，由 `scripts/build-index.js` 写进 `index-personas.json`。作者也可以直接把 ZIP 发给别人，用启动器「从本地安装」导入。
+
+## 4. 市场规则
+
+- 同一 ID 更新必须提高 `Version`、保持作者一致；已发布的同版本 ZIP 不可覆盖，撤回只移除目录条目。
+- 展示元数据 `plugins/<id>/market.json` 只接受 `readme`、`images`、`donation`；`readme` 默认 `README.md`（≤64 KiB），`images` 最多 8 张（PNG/JPG/GIF，单张 ≤2 MiB），`donation` 只接受爱发电个人主页链接。
+- 更新时间由生成器从 Git 提交时间推导，作者不能手写。
+- 目录条目的 `manifest`、`package.sha256`、`display` 由 CI 生成；`manifestSha256` 绑定清单原始字节。
+- 旧目录 `index.json`–`index-v4.json` 保留历史条目，不再接收新投稿；新插件与主题投 `index-v5.json`。
+
+## 5. 安全检测
+
+`security/README.md` 是完整说明。要点：
+
+- `security.yml` 使用 `pull_request_target`，只 checkout 可信 base 的检查器；候选分支只作为数据读取，候选源码、构建脚本和自带测试都不执行。
+- 0–3 级与 4 级都做静态检查：清单、实际包内容、ZIP 白名单、大小、符号链接、重复 JSON 键、SHA-256；声明与包内容不符即失败。
+- 4 级需要完整系统权限，检测使用固定镜像与固定宿主版本、无网络、无凭据、只读挂载和资源限制；检测通过不代表代码无害。
+- `security-selftest.yml` 验证检测流程本身；正式门禁与 attestation 以 `security.yml` 在默认分支的运行结果为准。
+
+## 6. 展示资料（可选）
+
+`plugins/<id>/market.json`：
+
+```json
+{
+  "readme": "README.md",
+  "images": ["preview.png"],
+  "donation": { "afdian": "https://afdian.com/a/your-name" }
+}
+```
+
+字段超出白名单、图片越界或 donation 非爱发电地址会导致目录生成失败。README 里引用的本地图片必须在 `images` 里声明。
+
+## 7. 历史格式（Api 1–4）
+
+旧 Api 1–4 的目录、溯源与文档仍保留在仓库里，便于历史版本与旧条目追溯：
+
+- Api 1/2 工具：`index.json`、`index-v2.json`。
+- Api 3 消息插件：`index-v3.json`，每版本需要 `provenance/<id>-<version>.json`。
+- Api 4 完整权限插件：`index-v4.json`，说明见 [docs/api4.md](docs/api4.md)。
+
+这些都按历史格式处理，不再接收新投稿；新插件请用 `whale-plugin/1`。旧条目照常按各自的校验规则工作。
+
+## 8. 参考文档
 
 | 想知道 | 去哪看 |
 | --- | --- |
-| 能做什么、清单字段怎么填 | [宿主仓库·插件作者入门](https://github.com/Banan1cee/whale_girl/blob/main/docs/插件作者入门.md) |
-| Api 1/2 接口与最小示例 | 本仓库 [`examples/`](examples/) |
-| Api 3 消息插件协议（7 个扩展点、输入 JSON、状态） | [插件消息流程Api3.md](https://github.com/Banan1cee/whale_girl/blob/main/docs/插件消息流程Api3.md) |
-| 改几行就能跑通的 Api 3 模板 | [`examples/api3-echo/`](examples/api3-echo/) |
-| 分级检测、溯源与代交 | [`security/README.md`](security/README.md) |
+| 新协议作者配方（Node/Wasm/主题） | [宿主仓库·插件作者入门](https://github.com/Banan1cee/whale_girl/blob/main/docs/插件作者入门.md) |
+| 协议细节、能力表与失败码 | [宿主仓库·插件协议](https://github.com/Banan1cee/whale_girl/blob/main/docs/插件协议.md) |
+| whale-plugin/1 最小示例 | [`examples/whale-plugin-v5/`](examples/whale-plugin-v5/) |
+| 检测、隔离与溯源 | [`security/README.md`](security/README.md) |
+| 投稿与设置规范 | [`AGENTS.md`](AGENTS.md) |
 
-> **客户端状态**：插件市场从已发布的 4.1.0 开始提供；JavaScript Api 4 最低 4.1.2，以对应 Releases 为准。合并后条目自动进入对应 API 目录，兼容客户端可安装。投稿前用目标版本「从本地安装」验证同一 ZIP；Api 3 示例为 `examples/api3-echo/`，Api 4 示例为 `examples/api4-search/`。
+发现问题请提交 Issue，注明插件 ID、版本与复现步骤；不要公开密钥或聊天记录。
 
-## 投稿前先读
+## 9. 第三方插件免责声明
 
-市场按实际包内容分级：人格预设走静态格式与文件检查；Api 3 消息插件每个版本必须进行 GitHub 托管虚拟机模拟运行测试、发布账号核验及包哈希绑定。通过不代表无病毒。作者操作、检测报告、固定版本溯源和维护者首次启用步骤见 [安全检测指南](security/README.md)。
-
-**分享个人预设可以直接发 ZIP。** 使用支持人设包的鲸鲸版本，在「插件市场 → 从本地安装」导入。群内分享无需 GitHub 账号。接收者仅安装来源可信的 ZIP。公开上架功能插件时，作者没有 GitHub 账号也可以把投稿资料交给愿意代交的协作者。
-
-**插件上架 PR 的唯一目标是 `Banan1cee/whale-girl-plugins:main`，由市场维护者审核合并。** 开始前请读 [插件投稿规范与 DSH 指令](AGENTS.md)。插件应是能独立安装的包，配置和操作统一放在「插件市场 → 已安装 → 设置」。
-
-如果目标版本的鲸鲸缺少所需接口，请保留插件草稿，列出缺少的扩展点，再交给作者决定。开发或上架插件的指令只授权插件范围，禁止据此修改鲸鲸主程序或给主仓库开 PR。
-
-## 设置和相关文档
-
-把可调整项做进卡片「设置」，在 `plugins/<id>/README.md` 提供可复制的配置 JSON、默认值和测试步骤。还可以放一份 `plugins/<id>/GUIDE.md` 作为使用教程。支持「相关文档」的鲸鲸客户端会在插件卡片里打开这两份文档。详细要求见 [插件投稿规范](AGENTS.md#投稿前核对设置和文档)。
-
-## 制作功能插件
-
-1. 复制 [示例清单](examples/plugin.json)，修改 Id、名称、作者、版本、兼容版本和结果标签。Id 使用小写英文字母、数字和短横线。
-2. 编译 WebAssembly 程序。第一版接口见 [文本工具箱源码](examples/text-counter.wat)。插件导出 `run() -> i32`，可调用 `whale.input_size() -> i32` 和 `whale.input_byte(index: i32) -> i32`。输入是 UTF-8，越界读取返回 -1。鲸鲸显示返回整数和清单中的结果标签。
-3. ZIP 根目录放 `plugin.json` 和 `plugin.wasm` 两个文件。无需安装脚本。ZIP 上限 1 MiB，Wasm 上限 512 KiB。
-4. 用鲸鲸的「从本地安装」验证。
-
-## 投稿：只加两个路径，目录自动生成
-
-**投稿不需要改 `index*.json`。** 一个 PR 只放这两样：
-
-```
-plugins/<id>/plugin.json                 插件清单（源码可放在同一目录）
-packages/<id>-<version>.zip              固定版本的安装包
-```
-
-### 一句话自检（小白和 agent 都用这个）
-
-```bash
-node scripts/submit.js plugins/<id>
-```
-
-它会打包 ZIP、在临时副本里生成目录、跑 `validate.py`，最后打印你要执行的 `git` / `gh` 命令。
-Api 3 再加一条：
-
-```bash
-node scripts/provenance.js plugins/<id> --login <你的 GitHub 名>
-```
-
-`scripts/package.js` 单独用也行（只打包并打印 SHA-256）；已发布的同版本包不允许覆盖，升级请先改 `Version`。
-
-合并到 main 后，`index` 工作流会运行 `node scripts/build-index.js`，按清单里的 `Api`/`Kind`
-把条目写进对应的 `index.json` / `index-v2.json` / `index-v3.json` / `index-personas.json`，
-并计算 SHA-256。作者不需要手写下载地址和哈希，也不会再因为同时改同一个 JSON 而冲突。
-
-本地预览生成结果：
-
-```bash
-node scripts/build-index.js --out /tmp/market-preview   # 写到你指定的目录
-node scripts/build-index.js --check                     # 检查已提交目录是否和源码同步
-```
-
-Api 3 消息插件仍需 `provenance/<id>-<version>.json`，并在 PR 里通过 `security` 工作流的虚拟机检测；
-人格预设只做静态格式检查。检测细节见 [安全检测指南](security/README.md)。
-
-> 没有鲸鲸客户端时也能投稿：本地校验（submit.js + validate）代替 GUI 试装，PR 里注明「未 GUI 试装，已过本地校验」即可先入库；等 4.1 发布后补试装记录。
-
-Api 1 工具只能读取用户在该工具页面输入的文字。Wasm 没有联网、读取微信或代发消息接口。Api 2 支持 UTF-8 文本输出，也可声明 `HostAction: chat.summary`，由兼容宿主在用户按次确认后提供汇总结果。兼容测试版可本地试装，公开上架前须按 [协作规则](AGENTS.md) 核对正式客户端和 CI。发现问题请提交 Issue，并注明插件 ID 和版本。
-
-## 第三方插件免责声明
-
-社区插件由各自作者开发和维护。市场收录、源码公开、哈希校验、扫描或审核不构成官方安全担保，不能保证无病毒、无恶意行为、无漏洞或始终兼容。本地分享的 ZIP 未经市场上架流程核验。
+社区插件由各自作者开发和维护。市场收录、源码公开、哈希校验、扫描或审核不构成官方安全担保，不能保证无病毒、无恶意行为、无漏洞或始终兼容。分享或导入的 ZIP 需自行确认来源可信。
 
 插件可能造成隐私泄露、数据损坏、程序崩溃、异常发言、账号风险或第三方服务费用。安装、更新和启用前请核对来源、版本及权限，备份重要数据并在可控环境测试。发现异常立即停用或卸载，并向作者和市场维护者反馈插件 ID、版本及问题；不要公开密钥或聊天记录。卸载不能撤销已发送的消息、已披露的数据或已产生的费用。
 

@@ -1,0 +1,14 @@
+{
+  "format": "whale-plugin/1",
+  "level": 0,
+  "id": "example-theme",
+  "name": "示例薄荷主题",
+  "author": "Your Name",
+  "version": "1.0.0",
+  "minAppVersion": "4.3.0",
+  "description": "示例：纯数据主题插件，无执行体、无系统权限",
+  "entry": "theme.json",
+  "runtime": "theme-data",
+  "provides": {},
+  "calls": []
+}

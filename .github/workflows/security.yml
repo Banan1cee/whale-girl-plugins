@@ -1,7 +1,18 @@
 name: market-security
 
-# 门禁使用默认分支的工作流和扫描器。投稿分支只提供 JSON 和 ZIP 数据。
-# 不 checkout 投稿分支，不运行投稿者的 JS、构建脚本、安装脚本或测试脚本。
+# 可信投稿门禁。
+#
+# 设计边界（见 security/GATE.md）：
+#   · pull_request_target 只 checkout 可信 base 的检查器和策略；候选分支只通过
+#     GitHub API 以数据形式下载清单/ZIP/README/图片，绝不 checkout 候选、绝不运行
+#     候选脚本/构建脚本/测试/工作流/扫描器。
+#   · 静态任务用只读 token；执行任务 permissions:{}，无 token/secret、无候选 checkout，
+#     固定 OCI 镜像；隔离或 pinned runtime 未就绪时 fail closed，不静默放过。
+#   · v5 目录由可信 base 的 build-index 从候选 plugins/+packages 派生；
+#     候选自带的 index-v5.json 不生效，派生后 0 条一律失败。
+#   · 签署只针对报告列出的市场 ZIP 哈希清单；不签插件输出或任意路径。
+#   · 结论是“通过既定检查”，不是无毒证明，也不替代杀毒软件。
+
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
@@ -17,10 +28,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  audit:
-    name: 插件安全门禁
+  static:
+    name: 静态门禁（可信 base，候选仅作数据）
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # PR 变更文件清单通过 base 仓库的 PR files API 读取，需要 pull-requests: read。
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,37 +46,108 @@ jobs:
           python-version: '3.12'
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-      - name: 分级检测与发布溯源
-        shell: pwsh
+          node-version: '20'
+      - name: 隔离适配器语法自检（不执行候选代码）
+        run: |
+          set -euo pipefail
+          node --check security/harness/run.cjs
+          node --check security/harness/selftest.cjs
+      - name: P0-2 可信检查器布局断言
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gate/trusted"
+          cp -r security "$RUNNER_TEMP/gate/trusted/"
+          test -f "$RUNNER_TEMP/gate/trusted/security/isolated.py"
+          test -f "$RUNNER_TEMP/gate/trusted/security/gate.py"
+      - name: 准备候选变更文件清单（fork 也可用，候选文本只作为数据）
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$BASE_REPO/pulls/$PR_NUMBER/files?per_page=100" \
+            | python -c 'import json,sys; pages=json.load(sys.stdin); files=[{"filename":f["filename"],"status":f["status"]} for page in pages for f in page]; json.dump(files, sys.stdout)' \
+            > "$RUNNER_TEMP/changed-files.json"
+      - name: 只读静态审查（不执行候选代码/脚本/工作流）
         env:
           AUDIT_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           AUDIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          AUDIT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          AUDIT_BASE_REPO: ${{ github.repository }}
+          AUDIT_BASE: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
           SUBMITTER: ${{ github.event.pull_request.user.login || github.actor }}
           SUBMITTER_ID: ${{ github.event.pull_request.user.id || github.actor_id }}
-          POLICY_COMMIT: ${{ github.event.pull_request.base.sha || github.sha }}
           GH_READ_TOKEN: ${{ github.token }}
           PYTHONUTF8: '1'
         run: |
-          $argsList = @('security/audit.py', '--repo', $env:AUDIT_REPO, '--ref', $env:AUDIT_SHA,
-            '--submitter', $env:SUBMITTER, '--submitter-id', $env:SUBMITTER_ID,
-            '--output', "$env:RUNNER_TEMP/security-output")
-          if ($env:AUDIT_BASE) { $argsList += @('--base', $env:AUDIT_BASE) }
-          python @argsList
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: 保存实际检测过的 ZIP 和报告
+          set -euo pipefail
+          args=(--repo "$AUDIT_REPO" --ref "$AUDIT_SHA" --base-repo "$AUDIT_BASE_REPO"
+                --output "$RUNNER_TEMP/gate/static")
+          if [ -n "${AUDIT_BASE:-}" ] && [ "$AUDIT_BASE" != "0000000000000000000000000000000000000000" ]; then
+            args+=(--base "$AUDIT_BASE")
+          fi
+          if [ -f "$RUNNER_TEMP/changed-files.json" ]; then
+            args+=(--changed-files "$RUNNER_TEMP/changed-files.json")
+          fi
+          if [ "${{ github.event_name }}" = "push" ]; then
+            args+=(--only-changed)
+          fi
+          args+=(--submitter "$SUBMITTER" --submitter-id "$SUBMITTER_ID")
+          python security/gate.py "${args[@]}"
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
-          name: market-security-${{ github.run_id }}
-          path: ${{ runner.temp }}/security-output/
+          name: security-static-${{ github.run_id }}
+          path: ${{ runner.temp }}/gate/
+          if-no-files-found: error
+          retention-days: 90
+
+  isolate:
+    name: 隔离执行（无 token、无 secret、不 checkout 候选）
+    needs: static
+    if: always() && needs.static.result == 'success'
+    permissions: {}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: security-static-${{ github.run_id }}
+          path: ${{ runner.temp }}/gate
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 分级隔离执行（固定镜像；隔离不可用则 fail closed）
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          set -uo pipefail
+          test -f "$RUNNER_TEMP/gate/trusted/security/isolated.py"
+          python "$RUNNER_TEMP/gate/trusted/security/isolated.py" \
+            --report "$RUNNER_TEMP/gate/static/security-report.json" \
+            --packages "$RUNNER_TEMP/gate/static/verified-packages" \
+            --fetch-runtime "$RUNNER_TEMP/pinned-runtime" \
+            --output "$RUNNER_TEMP/gate/isolated"
+          code=$?
+          if [ ! -f "$RUNNER_TEMP/gate/isolated/isolation-report.json" ]; then
+            mkdir -p "$RUNNER_TEMP/gate/isolated"
+            printf '%s\n' '{"schema":1,"status":"blocked","error":{"code":"isolation_unavailable","message":"isolation report was not produced"}}' \
+              > "$RUNNER_TEMP/gate/isolated/isolation-report.json"
+            code=2
+          fi
+          exit "$code"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-isolation-${{ github.run_id }}
+          path: ${{ runner.temp }}/gate/isolated/
           if-no-files-found: error
           retention-days: 90
 
   attest:
-    name: 签署已检测安装包
-    needs: audit
+    name: 签署已检测包哈希清单
+    needs: [static, isolate]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -69,11 +155,46 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      # 独立任务只签署前一任务的固定输出，不执行插件或下载的报告。
       - uses: actions/download-artifact@v4
         with:
-          name: market-security-${{ github.run_id }}
-          path: checked-packages
-      - uses: actions/attest@v4
+          name: security-static-${{ github.run_id }}
+          path: ${{ runner.temp }}/gate
+      - uses: actions/download-artifact@v4
         with:
-          subject-path: 'checked-packages/*'
+          name: security-isolation-${{ github.run_id }}
+          path: ${{ runner.temp }}/gate
+      - name: 只有投稿模式才签署（maintenance push 明确跳过）
+        id: gate
+        env:
+          REPORT: ${{ runner.temp }}/gate/static/security-report.json
+        run: |
+          set -euo pipefail
+          mode=$(python -c "import json,os;print(json.load(open(os.environ['REPORT'])).get('mode') or '')")
+          printf 'mode=%s\n' "$mode" >> "$GITHUB_OUTPUT"
+          if [ "$mode" != 'submission' ]; then
+            echo "no plugin submission in this push; nothing to attest (mode=$mode)"
+          fi
+      - name: 包清单必须同时绑定静态报告与隔离结果
+        if: steps.gate.outputs.mode == 'submission'
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          set -euo pipefail
+          test -f "$RUNNER_TEMP/gate/trusted/security/attest_subjects.py"
+          test -f "$RUNNER_TEMP/gate/isolated/isolation-report.json"
+          python "$RUNNER_TEMP/gate/trusted/security/attest_subjects.py" \
+            --report "$RUNNER_TEMP/gate/static/security-report.json" \
+            --packages "$RUNNER_TEMP/gate/static/verified-packages" \
+            --isolation "$RUNNER_TEMP/gate/isolated/isolation-report.json" \
+            --output "$RUNNER_TEMP/gate/attest"
+      - id: subjects
+        if: steps.gate.outputs.mode == 'submission'
+        run: |
+          set -euo pipefail
+          count=$(python -c "import sys;print(sum(1 for line in open(sys.argv[1]) if line.strip()))" \
+            "$RUNNER_TEMP/gate/attest/subjects.txt")
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@v2
+        if: steps.gate.outputs.mode == 'submission' && steps.subjects.outputs.count != '0'
+        with:
+          subject-path: '${{ runner.temp }}/gate/attest/attest-subjects/*.zip'

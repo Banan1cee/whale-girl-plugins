@@ -1,7 +1,18 @@
-﻿# 文本工具箱（text-counter）
+# 文本工具箱（text-counter）
 
-市场里最早的 Api 1 示例插件，用来验证「用户输入 → 返回整数」这条链路。
+- 等级：**1 级 · 受限 Wasm**
+- 入口：`plugin.wasm`（与迁移前保持同一份 Wasm）
+- provides：`tool.run@1`（manual / tool）
+- calls：无
+- 数据访问：无；不联网、不读写文件
+- 最低客户端：4.3.0
 
-- 源码：`examples/text-counter.wat`（手写 WAT，单函数返回输入字节数）
-- 包：`packages/text-counter-1.0.0.zip`
-- 本目录只放清单，方便 `scripts/build-index.js` 从 `plugins/` 生成 `index.json`。
+## 行为
+
+用户在插件卡片「运行一次」提交文本；Wasm 读取 UTF-8 输入并返回输入字节数（整数）。输出是 `tool.run@1` 的 JSON 值本身，不再有独立的展示标签。
+
+## 与迁移前的差异
+
+- 迁移前由宿主按旧声明式计算并展示结果；新协议统一走 `tool.run@1`，结果就是整数返回值。
+- 清单不再有旧版展示标签字段；没有新增能力、权限或网络访问。
+- Wasm 导入/导出契约保持 1 级整数工具不变，不重新编译。

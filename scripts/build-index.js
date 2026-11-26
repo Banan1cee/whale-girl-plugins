@@ -8,7 +8,8 @@
  * 现在作者只需要提交两样东西：
  *   plugins/<id>/plugin.json   插件清单
  *   packages/<id>-<version>.zip  固定版本的安装包
- * 目录（index.json / index-v2.json / index-v3.json / index-personas.json）由这个脚本生成。
+ * 目录（index.json / index-v2.json / index-v3.json / index-v4.json / index-personas.json 以及
+ * whale-plugin/1 的 index-v5.json）由这个脚本生成。
  *
  * 用法：
  *   node scripts/build-index.js              # 写入仓库根目录的四个目录文件
@@ -19,6 +20,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const v5 = require('./v5');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -29,6 +31,7 @@ function stripBom(text) {
 const PREFIX = 'https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/';
 const PERSONA = 'index-personas.json';
 const BY_API = { 1: 'index.json', 2: 'index-v2.json', 3: 'index-v3.json', 4: 'index-v4.json' };
+const V5_INDEX = v5.V5_INDEX;
 
 function readJson(file) {
   return JSON.parse(stripBom(fs.readFileSync(file, 'utf8')));
@@ -45,7 +48,7 @@ function catalogFor(manifest) {
 
 /** 扫描 plugins/ + packages/，返回 { 目录文件名: [条目...] } */
 function collect(root = ROOT) {
-  const out = { [BY_API[1]]: [], [BY_API[2]]: [], [BY_API[3]]: [], [BY_API[4]]: [], [PERSONA]: [] };
+  const out = { [BY_API[1]]: [], [BY_API[2]]: [], [BY_API[3]]: [], [BY_API[4]]: [], [PERSONA]: [], [V5_INDEX]: [] };
   const discussionsFile = path.join(root, 'discussion-issues.json');
   const discussions = fs.existsSync(discussionsFile) ? readJson(discussionsFile) : {};
   if (!discussions || Array.isArray(discussions) || typeof discussions !== 'object'
@@ -68,6 +71,8 @@ function collect(root = ROOT) {
       console.warn(`跳过 plugins/${name}：plugin.json 解析失败（${error.message}）`);
       continue;
     }
+    // whale-plugin/1 由 v5.collectV5 单独生成 index-v5.json，不进 Api 1-4 目录。
+    if (manifest.format === 'whale-plugin/1') continue;
     const catalog = catalogFor(manifest);
     if (!catalog) {
       console.warn(`跳过 plugins/${name}：Api=${manifest.Api} Kind=${manifest.Kind} 没有对应目录`);
@@ -87,10 +92,11 @@ function collect(root = ROOT) {
     });
   }
 
+  out[V5_INDEX] = v5.collectV5(root);
   const versionKey = (value) => String(value).split('.').map((part) => Number(part) || 0);
   const compare = (a, b) => String(a.Id).localeCompare(String(b.Id))
     || versionKey(a.Version).reduce((acc, part, index) => acc || part - (versionKey(b.Version)[index] || 0), 0);
-  for (const key of Object.keys(out)) out[key].sort(compare);
+  for (const key of Object.keys(out)) if (key !== V5_INDEX) out[key].sort(compare);
   return out;
 }
 
@@ -99,10 +105,12 @@ function serialize(list) {
 }
 
 function main(argv) {
+  const rootIndex = argv.indexOf('--root');
+  const root = rootIndex >= 0 ? path.resolve(argv[rootIndex + 1]) : ROOT;
   const outIndex = argv.indexOf('--out');
-  const outDir = outIndex >= 0 ? path.resolve(argv[outIndex + 1]) : ROOT;
+  const outDir = outIndex >= 0 ? path.resolve(argv[outIndex + 1]) : root;
   const check = argv.includes('--check');
-  const catalogs = collect();
+  const catalogs = collect(root);
 
   let drift = [];
   for (const [file, list] of Object.entries(catalogs)) {
@@ -131,4 +139,4 @@ function main(argv) {
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
 
-module.exports = { collect, serialize, PREFIX, BY_API, PERSONA };
+module.exports = { collect, serialize, PREFIX, BY_API, PERSONA, V5_INDEX };

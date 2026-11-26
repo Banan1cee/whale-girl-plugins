@@ -1,0 +1,1220 @@
+[
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 4,
+      "id": "breeze-sing",
+      "name": "Breezeblue 翻唱（新协议）",
+      "author": "Mz'yuu",
+      "version": "1.0.0",
+      "minAppVersion": "4.3.0",
+      "description": "保留点歌落单、副歌渲染、队列轮询与文本提示；受 whale-plugin/1 限制，聊天内点歌只在宿主已决定回复时触发，且翻唱音频不能作为微信语音发送。",
+      "entry": "plugin.js",
+      "runtime": "node-full",
+      "provides": {
+        "chat.pre_reply@1": {
+          "mode": "gate",
+          "scope": "all"
+        },
+        "task.tick@1": {
+          "mode": "schedule",
+          "scope": "all",
+          "intervalSeconds": 10
+        },
+        "tool.run@1": {
+          "mode": "tool",
+          "scope": "manual"
+        }
+      },
+      "calls": [
+        "message.send@1"
+      ],
+      "settingsSchema": {
+        "type": "object",
+        "properties": {
+          "coverCli": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "cover.mjs 路径",
+            "description": "本机 whale-cover 的 CLI 入口；留空按默认位置查找。"
+          },
+          "dataDir": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "数据目录",
+            "description": "orders/work/prep-status/songs 根目录；留空用 ~/.dsh/whale-cover。"
+          },
+          "python": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "Python 路径",
+            "description": "breeze-prep 使用的 Python；留空用引擎 venv 默认路径。"
+          },
+          "ffmpeg": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "ffmpeg 目录",
+            "description": "breeze-prep 使用的 ffmpeg 目录；留空自动探测。"
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "seedvc"
+            ],
+            "title": "引擎",
+            "description": "翻唱引擎；当前迁移版只支持 seedvc（旧 rvc 订单不会处理）。"
+          },
+          "maxSeconds": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 180,
+            "title": "副歌秒数",
+            "description": "截取并翻唱的副歌长度，默认 54 秒。"
+          },
+          "onlyGroup": {
+            "type": "boolean",
+            "title": "仅群聊点歌",
+            "description": "默认 true：私聊只响应「唱」；关闭后私聊也接受点歌。"
+          },
+          "autoRender": {
+            "type": "boolean",
+            "title": "自动渲染队列",
+            "description": "默认 true：task.tick 自动起 prep/render；关闭后只保留手动工具。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "executionTimeoutMs": 20000
+    },
+    "manifestSha256": "198a0ec1670e6a0fea9a6e2a383094553547a35c385eff49e5299ad963ec409d",
+    "package": {
+      "path": "packages/breeze-sing-1.0.0.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/breeze-sing-1.0.0.zip",
+      "sha256": "ca08fdc7b561923f00b4b4e78d25583450da943db2b264ce7b8b3e7dc631a24a",
+      "bytes": 37679
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/breeze-sing/README.md",
+        "sha256": "feb5428c72302a8376f429fa5ae72e0e9bbae0d55e40ce1951e326117c9f38cc",
+        "bytes": 7461
+      },
+      "updatedAt": "2026-11-18T23:35:04+08:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 4,
+      "id": "breezeblue-sing",
+      "name": "Breezeblue 翻唱（本地发送器版，新协议）",
+      "author": "RacOrange",
+      "version": "2.0.0",
+      "minAppVersion": "4.3.0",
+      "description": "保留点歌落单、副歌渲染、队列轮询与文本提示；受 whale-plugin/1 限制，聊天内点歌只在宿主已决定回复时触发，且翻唱音频不能作为微信语音发送。",
+      "entry": "plugin.js",
+      "runtime": "node-full",
+      "provides": {
+        "chat.pre_reply@1": {
+          "mode": "gate",
+          "scope": "all"
+        },
+        "task.tick@1": {
+          "mode": "schedule",
+          "scope": "all",
+          "intervalSeconds": 10
+        },
+        "tool.run@1": {
+          "mode": "tool",
+          "scope": "manual"
+        }
+      },
+      "calls": [
+        "message.send@1"
+      ],
+      "settingsSchema": {
+        "type": "object",
+        "properties": {
+          "coverCli": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "cover.mjs 路径",
+            "description": "本机 whale-cover 的 CLI 入口；留空按默认位置查找。"
+          },
+          "dataDir": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "数据目录",
+            "description": "orders/work/prep-status/songs 根目录；留空用 ~/.dsh/whale-cover。"
+          },
+          "python": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "Python 路径",
+            "description": "breeze-prep 使用的 Python；留空用引擎 venv 默认路径。"
+          },
+          "ffmpeg": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "ffmpeg 目录",
+            "description": "breeze-prep 使用的 ffmpeg 目录；留空自动探测。"
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "seedvc"
+            ],
+            "title": "引擎",
+            "description": "翻唱引擎；当前迁移版只支持 seedvc（旧 rvc 订单不会处理）。"
+          },
+          "maxSeconds": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 180,
+            "title": "副歌秒数",
+            "description": "截取并翻唱的副歌长度，默认 54 秒。"
+          },
+          "onlyGroup": {
+            "type": "boolean",
+            "title": "仅群聊点歌",
+            "description": "默认 true：私聊只响应「唱」；关闭后私聊也接受点歌。"
+          },
+          "autoRender": {
+            "type": "boolean",
+            "title": "自动渲染队列",
+            "description": "默认 true：task.tick 自动起 prep/render；关闭后只保留手动工具。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "executionTimeoutMs": 20000
+    },
+    "manifestSha256": "94b0dcb89db994035e23bb7513de76be0e300206a6edec2f3212505ea4d58838",
+    "package": {
+      "path": "packages/breezeblue-sing-2.0.0.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/breezeblue-sing-2.0.0.zip",
+      "sha256": "1ab76032554785978380c843acc4c587db8459a147aeefc2c4337bbb2c858eeb",
+      "bytes": 37707
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/breezeblue-sing/README.md",
+        "sha256": "d48a398b73bd82116fd3350184feeb9d46d7469195b211e1512607bd6681c211",
+        "bytes": 7763
+      },
+      "updatedAt": "2026-11-24T17:53:46+08:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 4,
+      "id": "care-plus",
+      "name": "主动搭话增强（4 级）",
+      "author": "kelin",
+      "version": "1.0.2",
+      "minAppVersion": "4.3.0",
+      "description": "保留随机沉默锚点、人物卡/日记话头与候选打分；因新协议读不到官方 care 设置，目标与时段改为插件内配置，且无法自动关闭官方 care。",
+      "entry": "plugin.js",
+      "runtime": "node-full",
+      "provides": {
+        "tool.run@1": {
+          "mode": "tool",
+          "scope": "manual"
+        },
+        "task.tick@1": {
+          "mode": "schedule",
+          "scope": "all",
+          "intervalSeconds": 300
+        }
+      },
+      "calls": [
+        "persona.read@1",
+        "memory.recent@1",
+        "model.complete@1",
+        "message.send@1",
+        "care.decide@1"
+      ],
+      "settingsSchema": {
+        "type": "object",
+        "properties": {
+          "targets": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "目标",
+            "description": "会话 ID，逗号分隔；空则使用 care.decide@1 给出的单个目标。"
+          },
+          "windows": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "允许时段",
+            "description": "如 10:00-23:59，逗号分隔多段；空表示不限。"
+          },
+          "minIntervalMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 43200,
+            "title": "最短沉默（分钟）"
+          },
+          "maxIntervalMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 43200,
+            "title": "最长沉默（分钟）"
+          },
+          "maxPerDay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50,
+            "title": "每天上限"
+          },
+          "bootSilentMinutes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1440,
+            "title": "启动静默（分钟）"
+          },
+          "maxChars": {
+            "type": "integer",
+            "minimum": 12,
+            "maximum": 200,
+            "title": "单句字数"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "title": "只生成不发送"
+          }
+        },
+        "additionalProperties": false
+      },
+      "executionTimeoutMs": 90000
+    },
+    "manifestSha256": "3767f0dea3b516b9911e5bf5aeb846888d13ed79e142039664573a8200121816",
+    "package": {
+      "path": "packages/care-plus-1.0.2.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/care-plus-1.0.2.zip",
+      "sha256": "971819a109c481ae689e448cfe690907c9b7a5800abc05061e82d2c90b796b5e",
+      "bytes": 20266
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/care-plus/README.md",
+        "sha256": "ed6fc8130e946dee78c23dde6d00b3b519b02a6f97a7c512bc3280aa1a577f3a",
+        "bytes": 6654
+      },
+      "updatedAt": "2026-11-19T21:20:34+08:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 4,
+      "id": "codebuddy-cli-model",
+      "name": "CodeBuddy CLI 直连",
+      "author": "Grace-alan510",
+      "version": "2.0.2",
+      "minAppVersion": "4.3.0",
+      "description": "本轮回复交给本机 CodeBuddy CLI 生成；失败或跳过时用鲸鲸原模型回复。Key 只在用户本机设置里保存，不进包；默认不发送聊天历史。支持微信内发「模型」菜单切换、发「当前模型」查询、发「恢复默认模型」还原。",
+      "entry": "plugin.js",
+      "runtime": "node-full",
+      "executionTimeoutMs": 120000,
+      "provides": {
+        "chat.generate@1": {
+          "mode": "replace",
+          "scope": "all"
+        }
+      },
+      "calls": [
+        "model.complete@1"
+      ],
+      "settingsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "CodeBuddy API Key",
+            "description": "只保存在本机设置里，不随包分发"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "模型",
+            "description": "编号/别名/完整 ID；留空则用菜单选择或默认模型"
+          },
+          "cliEntry": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "CLI 入口路径",
+            "description": "留空则自动探测 npm 全局安装位置"
+          },
+          "cwd": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "CLI 工作目录",
+            "description": "留空则用用户主目录"
+          },
+          "internetEnvironment": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "联网环境变量",
+            "description": "透传给 CLI 的可选环境名"
+          },
+          "useHostSystem": {
+            "type": "boolean",
+            "title": "使用宿主 system",
+            "description": "默认开启，把鲸鲸 system prompt 交给 CLI"
+          },
+          "historyTurns": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 12,
+            "title": "携带历史轮数",
+            "description": "默认 0；开启后把最近 N 轮交给 CLI"
+          },
+          "skipPatterns": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "跳过词",
+            "description": "换行或逗号分隔；命中时交回原模型"
+          },
+          "onError": {
+            "type": "string",
+            "enum": [
+              "notify-once",
+              "fallback"
+            ],
+            "title": "失败处理",
+            "description": "notify-once 每会话提示一次，fallback 静默交回原模型"
+          },
+          "debug": {
+            "type": "boolean",
+            "title": "显示错误码",
+            "description": "默认关闭，只在提示里附加错误类别"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 115000,
+            "title": "CLI 超时",
+            "description": "默认 110000 毫秒"
+          }
+        }
+      },
+      "dataAccess": [
+        "model.prompt",
+        "chat.history"
+      ]
+    },
+    "manifestSha256": "304ff0006269fb868d615f3c871fd96fd04273630758555675f3dc0955c6e48e",
+    "package": {
+      "path": "packages/codebuddy-cli-model-2.0.2.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/codebuddy-cli-model-2.0.2.zip",
+      "sha256": "8ac5228e54f4a4ec3c9e19c99fe671655c276161ca4d3604d1ceb5d9fb0e9210",
+      "bytes": 26811
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/codebuddy-cli-model/README.md",
+        "sha256": "b31be4688a51fc2389206b7b9f5e63527413c4fb41e2f413a36135e725b43bec",
+        "bytes": 5509
+      },
+      "updatedAt": "2026-11-14T12:33:57+03:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 3,
+      "id": "context-notes",
+      "name": "上下文读取",
+      "author": "Xiaokun2233",
+      "version": "2.0.0",
+      "minAppVersion": "4.3.0",
+      "description": "两个环节：回复前读最近 12 条并用独立 state 累计跨轮上下文，补一张便签（谁在连发、有没有问题没答、第几次找你）；发送前清掉 Markdown、压缩空白、拦住跑飞的长回复。",
+      "entry": "plugin.wasm",
+      "runtime": "wasm-restricted",
+      "provides": {
+        "chat.prompt@1": {
+          "mode": "enhance",
+          "scope": "all"
+        },
+        "chat.before_send@1": {
+          "mode": "enhance",
+          "scope": "all"
+        }
+      },
+      "calls": [],
+      "compat": "api3",
+      "dataAccess": [
+        "chat.history",
+        "model.prompt"
+      ]
+    },
+    "manifestSha256": "efe16dc686b8a3bef83d1424b0f823a99ee78a3aa78ec8505e8e5577f681d587",
+    "package": {
+      "path": "packages/context-notes-2.0.0.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/context-notes-2.0.0.zip",
+      "sha256": "a3776e66340d96e69517cdf6a4e2384fd91d5bac69f91aaa4a63c49822e3943b",
+      "bytes": 13660
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/context-notes/README.md",
+        "sha256": "17e95cc000dc62ccfdcfdca76feb5b3f70d3eafc18ffbfe9c02a7de1be5bdc9f",
+        "bytes": 2342
+      },
+      "updatedAt": "2026-11-14T05:20:35Z"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 2,
+      "id": "daily-digest",
+      "name": "日报便签",
+      "author": "Banan1cee",
+      "version": "2.0.0",
+      "minAppVersion": "4.3.0",
+      "description": "把「消息汇总」生成的日报整理成可直接粘贴的纯文本：标题变【】，列表变·，去掉 Markdown 符号，压掉多余空行。",
+      "entry": "plugin.wasm",
+      "runtime": "wasm-restricted",
+      "provides": {
+        "tool.run@1": {
+          "mode": "tool",
+          "scope": "manual"
+        }
+      },
+      "calls": []
+    },
+    "manifestSha256": "368f2bf5530752a76b702d7adcdca8c4285e6acc73965779403a76ec059c73a9",
+    "package": {
+      "path": "packages/daily-digest-2.0.0.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/daily-digest-2.0.0.zip",
+      "sha256": "a61bb8b7b47b80bc71723b8de824fbdb790384d9cd2ed9067570808c2f869175",
+      "bytes": 1235
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/daily-digest/README.md",
+        "sha256": "73ac87cc141e55f5a683be1604c32de6faeaf591e23f7ce84bdfa4ce6a15c4e1",
+        "bytes": 956
+      },
+      "updatedAt": "2026-11-11T13:48:04+08:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 3,
+      "id": "followup-window",
+      "name": "接话窗口",
+      "author": "Banan1cee",
+      "version": "2.0.0",
+      "minAppVersion": "4.3.0",
+      "description": "她回完一句后，只对刚回的那个人开一段接话窗口：最多再顺接 3 句、180 秒内有效；别人一插话立刻收口，纯捧场、叫别人、超窗口都不接。替代「被 @ 一次就谁说话都回」。",
+      "entry": "plugin.wasm",
+      "runtime": "wasm-restricted",
+      "provides": {
+        "chat.pre_reply@1": {
+          "mode": "gate",
+          "scope": "all"
+        },
+        "chat.reply@1": {
+          "mode": "enhance",
+          "scope": "all"
+        }
+      },
+      "calls": [],
+      "compat": "api3",
+      "dataAccess": []
+    },
+    "manifestSha256": "0a728accc01d7c11579f92cd034562af08cae8a71997c3df59c5c02b3d8181d9",
+    "package": {
+      "path": "packages/followup-window-2.0.0.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/followup-window-2.0.0.zip",
+      "sha256": "9bbc33914a2797d85a04ce5c6e3024f1f6babc80487c48cb59d6dfdae372a2f7",
+      "bytes": 6983
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/followup-window/README.md",
+        "sha256": "af01d47ecb8705fdcb6fadabdb1157ce54ab8768271291b06ac2a98ae5ebfac1",
+        "bytes": 2382
+      },
+      "updatedAt": "2026-11-11T15:27:50+08:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 4,
+      "id": "notes",
+      "name": "随手记",
+      "author": "zh-hang",
+      "version": "2.0.2",
+      "minAppVersion": "4.3.0",
+      "description": "本地随手记：/record 记录并自动归类，/read 按时间、类别、关键词或编号读回，/delete 软删除并支持 undo，/whoami 查看宿主字段。记录按发送者隔离，只写插件自己的数据目录；超长内容分段经宿主发送通道排队补发，不保证立即送达。",
+      "entry": "plugin.js",
+      "runtime": "node-full",
+      "executionTimeoutMs": 20000,
+      "provides": {
+        "chat.generate@1": {
+          "mode": "replace",
+          "scope": "all"
+        }
+      },
+      "calls": [
+        "message.send@1",
+        "model.complete@1"
+      ],
+      "settingsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "noteDir": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "笔记目录",
+            "description": "插件数据目录下的相对目录，默认 note"
+          },
+          "readLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "title": "每次读取条数",
+            "description": "默认 10"
+          },
+          "maxItemChars": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 20000,
+            "title": "单条上限",
+            "description": "单条记录最多多少字，默认 5000"
+          },
+          "allowDelete": {
+            "type": "boolean",
+            "title": "允许删除",
+            "description": "关闭后 /delete 拒绝执行，默认开"
+          },
+          "chunkChars": {
+            "type": "integer",
+            "minimum": 300,
+            "maximum": 12000,
+            "title": "分段字数",
+            "description": "一条消息装多少字，默认 1500"
+          },
+          "autoSend": {
+            "type": "boolean",
+            "title": "超长自动补发",
+            "description": "关闭后只回第一段并给翻页提示"
+          }
+        }
+      },
+      "dataAccess": [
+        "model.prompt",
+        "chat.history"
+      ]
+    },
+    "manifestSha256": "459616f8482e1e6d61c2a0aa38c8c13d3b029d20a30d13210b5ce0935d0bc093",
+    "package": {
+      "path": "packages/notes-2.0.2.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/notes-2.0.2.zip",
+      "sha256": "cae7f98817fb1c1832edca48b2ce18c7155f39422bd9c4b7b4ffefeff9da3913",
+      "bytes": 31394
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/notes/README.md",
+        "sha256": "5f274b113bafdf27fb52c0be364eb701525f91087e37647a18877ea78392f16c",
+        "bytes": 4153
+      },
+      "updatedAt": "2026-11-17T01:46:37+08:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 4,
+      "id": "quiet-group",
+      "name": "群聊安静模式",
+      "author": "WilliamsSum",
+      "version": "1.1.1",
+      "minAppVersion": "4.3.0",
+      "description": "在指定微信群拦截普通消息的自动回复，保留明确 @ 机器人和引用回复机器人；4 级 Node 插件，需确认完整系统权限。群名单留空时沿用宿主规则，不联网、不发送消息。",
+      "entry": "plugin.js",
+      "runtime": "node-full",
+      "provides": {
+        "chat.pre_reply@1": {
+          "mode": "gate",
+          "scope": "all"
+        }
+      },
+      "calls": [],
+      "settingsSchema": {
+        "type": "object",
+        "properties": {
+          "groups": {
+            "type": "string",
+            "title": "启用安静模式的群 ID",
+            "description": "填写微信会话 ID，以逗号分隔；留空表示所有会话沿用宿主规则。",
+            "maxLength": 2000
+          }
+        },
+        "additionalProperties": false
+      },
+      "executionTimeoutMs": 10000
+    },
+    "manifestSha256": "a18e003d84957766887bc4e774682a97a41715661da33c0e3c455c928f78a8dc",
+    "package": {
+      "path": "packages/quiet-group-1.1.1.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/quiet-group-1.1.1.zip",
+      "sha256": "4b892f4059f9be041816aacb6d39323cf0f16e63b133114ac914ab34ea2474bb",
+      "bytes": 2207
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/quiet-group/README.md",
+        "sha256": "f396f771dbd14e1418b6bbff32ec66393f208a5707a3d3cf998641de944f586f",
+        "bytes": 4312
+      },
+      "updatedAt": "2026-11-23T00:42:46+08:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 4,
+      "id": "ruiping",
+      "name": "锐评",
+      "author": "Peelorange233",
+      "version": "2.0.2",
+      "minAppVersion": "4.3.0",
+      "description": "先检索事实，再用金句或暴论锐评真实事件；4 级 Node 插件。新协议不再提供搜索渠道/attempts/dateFilter/thinking 元数据，chat.search 与 chat.generate 的 replace 为独占模式；生成失败无法交回宿主，详见 README。",
+      "entry": "plugin.js",
+      "runtime": "node-full",
+      "provides": {
+        "chat.search@1": {
+          "mode": "replace",
+          "scope": "all"
+        },
+        "chat.pre_reply@1": {
+          "mode": "gate",
+          "scope": "all"
+        },
+        "chat.generate@1": {
+          "mode": "replace",
+          "scope": "all"
+        },
+        "tool.run@1": {
+          "mode": "tool",
+          "scope": "manual"
+        }
+      },
+      "calls": [
+        "search.query@1",
+        "model.complete@1"
+      ],
+      "settingsSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "金句",
+              "暴论"
+            ],
+            "title": "锐评模式",
+            "description": "金句偏短句结论；暴论偏强判断。"
+          },
+          "maxChars": {
+            "type": "integer",
+            "minimum": 12,
+            "maximum": 120,
+            "title": "正文上限",
+            "description": "锐评正文最多多少个汉字。"
+          },
+          "facts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "title": "事实条数",
+            "description": "最多保留几条经核对的事实。"
+          },
+          "minItems": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "title": "最少资料条数",
+            "description": "检索结果少于此数时不锐评。"
+          },
+          "freshness": {
+            "type": "string",
+            "enum": [
+              "",
+              "today",
+              "yesterday",
+              "week",
+              "month",
+              "year"
+            ],
+            "title": "时效",
+            "description": "搜索时效；空字符串表示不限定。"
+          },
+          "timeZone": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "时区",
+            "description": "解析昨天/今天等日期时使用的 IANA 时区。"
+          },
+          "inChat": {
+            "type": "boolean",
+            "title": "聊天内启用",
+            "description": "关闭后聊天搜索/生成/前置闸都不处理，只保留手动工具。"
+          },
+          "wake": {
+            "type": "boolean",
+            "title": "未被点名也接话",
+            "description": "群聊未被 @ 时，命中锐评关键词由前置闸返回 wake。"
+          },
+          "showSources": {
+            "type": "boolean",
+            "title": "显示来源",
+            "description": "在回复末尾附来源标题与链接。"
+          },
+          "evidenceItems": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "title": "证据条数",
+            "description": "生成时最多取几条检索结果作为证据。"
+          },
+          "searchTimeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 30000,
+            "title": "检索超时",
+            "description": "单次 search.query@1 的超时时间（毫秒）。"
+          },
+          "modelMaxTokens": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 4000,
+            "title": "模型 token 上限",
+            "description": "单次 model.complete@1 的 maxTokens。"
+          },
+          "keywords": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "触发关键词",
+            "description": "逗号或空白分隔，默认锐评、暴论。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "executionTimeoutMs": 90000
+    },
+    "manifestSha256": "6a98abfb936a574197080c9c3cf5c2a665f212a84676ac8b92a4e99f0f9307f4",
+    "package": {
+      "path": "packages/ruiping-2.0.2.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/ruiping-2.0.2.zip",
+      "sha256": "3f9ab1fcbf0ef83ecf65b0c1fee1f94b149876bb4f8500b89b3ec415dd03820a",
+      "bytes": 41040
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/ruiping/README.md",
+        "sha256": "b104c6c6cfb3cbbacc7435a828887a9709abff8eb697b5b5b73ae116daf63291",
+        "bytes": 9280
+      },
+      "updatedAt": "2026-11-16T22:23:24+08:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 4,
+      "id": "smart-care",
+      "name": "智能搭话（新协议版）",
+      "author": "Jy-Levent",
+      "version": "2.0.1",
+      "minAppVersion": "4.3.0",
+      "description": "保留点名搭话、搜索增强、定时主动搭话与被无视生气；内部 config/care-state/contacts/persona/DeepSeek Key 直读全部改为 host.call 或降级，官方 care 同时开启时可能双发。",
+      "entry": "plugin.js",
+      "runtime": "node-full",
+      "provides": {
+        "task.tick@1": {
+          "mode": "schedule",
+          "scope": "all",
+          "intervalSeconds": 60
+        },
+        "chat.pre_reply@1": {
+          "mode": "gate",
+          "scope": "all"
+        },
+        "chat.prompt@1": {
+          "mode": "enhance",
+          "scope": "all"
+        },
+        "chat.search@1": {
+          "mode": "replace",
+          "scope": "all"
+        }
+      },
+      "calls": [
+        "care.decide@1",
+        "contacts.list@1",
+        "persona.read@1",
+        "model.complete@1",
+        "message.send@1",
+        "search.query@1"
+      ],
+      "settingsSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "启用",
+            "description": "关闭后插件完全不干预。"
+          },
+          "minIntervalMinutes": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1440,
+            "title": "搜索最小间隔（分钟）",
+            "description": "两次搜索增强之间的最短间隔，默认 30。"
+          },
+          "maxPerHour": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "title": "每小时搜索上限",
+            "description": "限制联网预算，默认 4。"
+          },
+          "careInterestChance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "title": "带兴趣话题的概率",
+            "description": "点名/定时搭话使用兴趣话题的百分比，默认 90。"
+          },
+          "autoCare": {
+            "type": "boolean",
+            "title": "接管定时主动搭话",
+            "description": "按宿主 care 配置的窗口/白名单/频率主动搭话；默认开。"
+          },
+          "angryEnabled": {
+            "type": "boolean",
+            "title": "被无视会生气",
+            "description": "连续被无视后按等级生气；默认开。"
+          },
+          "ignoreThreshold": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "title": "连续几次没回才生气",
+            "description": "默认 2。"
+          },
+          "ignoreWindowMinutes": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 240,
+            "title": "多久没回算被无视（分钟）",
+            "description": "默认 20。"
+          },
+          "outboundGapMinutes": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 240,
+            "title": "搭话/生气间隔（分钟）",
+            "description": "两类主动消息的最小间隔，默认 10。"
+          },
+          "angryStartDelayMinutes": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 720,
+            "title": "生气触发延迟（分钟）",
+            "description": "达到阈值后还要沉默多久才发第一句，默认 30。"
+          },
+          "angryLevelUpMinutes": {
+            "type": "number",
+            "minimum": 5,
+            "maximum": 720,
+            "title": "生气升级间隔（分钟）",
+            "description": "每级间隔，默认 60。"
+          },
+          "interestWords": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "兴趣词（逗号分隔）",
+            "description": "旧版从 persona.customPrompt 自动提取；新 persona.read 不返回 customPrompt，改为显式填写。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "executionTimeoutMs": 45000,
+      "dataAccess": [
+        "model.prompt"
+      ]
+    },
+    "manifestSha256": "9775f00af9dee8accfa9bb7ee519993547058686bbd60f65873d8400927977d8",
+    "package": {
+      "path": "packages/smart-care-2.0.1.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/smart-care-2.0.1.zip",
+      "sha256": "b117117be0bbb2f0b8fa3b8eb5dc0a03851fee0c11d4d2fcc1531cb3fcb58299",
+      "bytes": 28448
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/smart-care/README.md",
+        "sha256": "81c2433862db7aa6b65b07f8b5220d8598aa9dfe0ca4f6305a9c2fae19dc924d",
+        "bytes": 7923
+      },
+      "updatedAt": "2026-11-22T20:08:01+08:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 1,
+      "id": "text-counter",
+      "name": "文本工具箱",
+      "author": "Banan1cee",
+      "version": "2.0.0",
+      "minAppVersion": "4.3.0",
+      "description": "统计输入文本的 UTF-8 字节数。适合检查文本体积。",
+      "entry": "plugin.wasm",
+      "runtime": "wasm-restricted",
+      "provides": {
+        "tool.run@1": {
+          "mode": "tool",
+          "scope": "manual"
+        }
+      },
+      "calls": []
+    },
+    "manifestSha256": "46ccd3dcdeab41cc6729dff227b8d1fd3666532874322467cdf638b8b3d3fbfd",
+    "package": {
+      "path": "packages/text-counter-2.0.0.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/text-counter-2.0.0.zip",
+      "sha256": "4e660e8aa1e27fbd9fb9626f4da5e5490d7e2d46da04486ee098aa08c006d4c4",
+      "bytes": 705
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/text-counter/README.md",
+        "sha256": "f6865b497f0e95fc52620481721d3d8fa54b200c974ef34d1b0ca4eb444f7c37",
+        "bytes": 798
+      },
+      "updatedAt": "2026-11-12T17:58:13+08:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 4,
+      "id": "voice-tone",
+      "name": "语音语气（新协议降级版）",
+      "author": "Jy-Levent",
+      "version": "2.0.0",
+      "minAppVersion": "4.3.0",
+      "description": "保留 Breeze 语音标签规范注入与“明确要语音时”的草稿标签增强；不再改写宿主语音概率或 voice-send.json，也不保证本轮一定走语音通道。",
+      "entry": "plugin.js",
+      "runtime": "node-full",
+      "provides": {
+        "chat.prompt@1": {
+          "mode": "enhance",
+          "scope": "all"
+        },
+        "chat.before_send@1": {
+          "mode": "enhance",
+          "scope": "all"
+        },
+        "chat.dispatched@1": {
+          "mode": "observe",
+          "scope": "all"
+        }
+      },
+      "calls": [],
+      "settingsSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "启用",
+            "description": "关闭后完全不干预：不改提示词、不加标签。"
+          },
+          "preset": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "预设",
+            "description": "内置预设名：irritable / adorkable / normal / gentle / cold；留空用 irritable。"
+          },
+          "voiceChanceOverride": {
+            "type": "integer",
+            "minimum": -1,
+            "maximum": 100,
+            "title": "语音概率覆盖（迁移后不生效）",
+            "description": "新协议不能控制发送通道；此字段仅为旧设置迁移保留，不再影响行为。"
+          },
+          "injectTagRules": {
+            "type": "boolean",
+            "title": "注入标签规范",
+            "description": "把“只用官方 34 个标签”的规则追加到 system；需要协议 v2 的 4 级 dataAccess。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "executionTimeoutMs": 20000,
+      "dataAccess": [
+        "model.prompt"
+      ]
+    },
+    "manifestSha256": "298d1de13064d0a9ba79c483284736a85e05f294d7137f9e20e8c2c8d2b4dda6",
+    "package": {
+      "path": "packages/voice-tone-2.0.0.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/voice-tone-2.0.0.zip",
+      "sha256": "b4ab9a219c98afbadf9823142ac63aaa0596b956281e9305aeb378d11542b0ba",
+      "bytes": 18580
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/voice-tone/README.md",
+        "sha256": "2895a2fcc8a213dbaf08b347e0d54b572342c4d4d45859d01344a4d3e0b12297",
+        "bytes": 4647
+      },
+      "updatedAt": "2026-11-22T00:29:05+08:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 4,
+      "id": "whale-dsh-bridge",
+      "name": "DSH 桥接",
+      "author": "LFrs-Cyberpunk",
+      "version": "2.0.2",
+      "minAppVersion": "4.3.0",
+      "description": "把本轮回复转给本机 DSH 生成；未连通、无文本或出错时自动交回鲸鲸原模型，不会不回消息。人设默认使用鲸鲸本轮 system；只访问设置里的 DSH 地址，失败原因写到插件数据目录便于排查。",
+      "entry": "plugin.js",
+      "runtime": "node-full",
+      "executionTimeoutMs": 60000,
+      "provides": {
+        "chat.generate@1": {
+          "mode": "replace",
+          "scope": "all"
+        }
+      },
+      "calls": [
+        "model.complete@1"
+      ],
+      "settingsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "DSH 地址",
+            "description": "默认 http://127.0.0.1:57321；只把消息发到这个地址"
+          },
+          "token": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "桥接令牌",
+            "description": "DSH 侧要求的 Bearer token；为空时不转发"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 55000,
+            "title": "超时",
+            "description": "毫秒，默认 40000"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "启用桥接",
+            "description": "关闭时全部交回鲸鲸原模型"
+          },
+          "personaSource": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "人设来源",
+            "description": "whale=使用本轮 system；custom=由 DSH 侧决定"
+          }
+        }
+      },
+      "dataAccess": [
+        "model.prompt",
+        "chat.history"
+      ]
+    },
+    "manifestSha256": "673aaf5d6ee4185088181d02cd57c57b4d32d69705ed46435de08bfa29959144",
+    "package": {
+      "path": "packages/whale-dsh-bridge-2.0.2.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/whale-dsh-bridge-2.0.2.zip",
+      "sha256": "153d0591704dedf9e8e3e44ffeaf243d5d07abb6582b6b9e08dec8d19e39fa25",
+      "bytes": 9617
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/whale-dsh-bridge/README.md",
+        "sha256": "1651d923e4598b1829aa0c82437975174db490f03d5ef554df3b7db561960fb3",
+        "bytes": 4193
+      },
+      "updatedAt": "2026-11-17T00:51:49+08:00"
+    }
+  },
+  {
+    "manifest": {
+      "format": "whale-plugin/1",
+      "level": 4,
+      "id": "xmding",
+      "name": "小咪叮（4 级）",
+      "author": "atroy",
+      "version": "2.0.2",
+      "minAppVersion": "4.3.0",
+      "description": "按会话 ID 或联系人名称发送文字或语音意图，支持 dryRun 与联系人搜索；新协议不再支持图片、回执查询和独立监听转发。",
+      "entry": "plugin.js",
+      "runtime": "node-full",
+      "provides": {
+        "tool.run@1": {
+          "mode": "tool",
+          "scope": "manual"
+        }
+      },
+      "calls": [
+        "contacts.list@1",
+        "message.send@1"
+      ],
+      "settingsSchema": {
+        "type": "object",
+        "properties": {
+          "keepNewline": {
+            "type": "boolean",
+            "title": "保留换行",
+            "description": "旧版默认把换行替换成 VT 以绕过旧发送器；新协议不保证该行为，默认原样发送。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "executionTimeoutMs": 45000
+    },
+    "manifestSha256": "4767029e41b3d037f2df656292ae1b7444d5b54fdb2d9080b4a6afbd8a6fdb50",
+    "package": {
+      "path": "packages/xmding-2.0.2.zip",
+      "download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/xmding-2.0.2.zip",
+      "sha256": "aaffbd9354df13729c94c08e56b8a3375bb89e4ee654bf34673af4b2412fa47f",
+      "bytes": 9306
+    },
+    "display": {
+      "readme": {
+        "path": "plugins/xmding/README.md",
+        "sha256": "6b25480328316be2616616aa7c7d9d980fcc572010df1aeedaff4007c4dcce50",
+        "bytes": 5749
+      },
+      "updatedAt": "2026-11-23T23:55:18+08:00"
+    }
+  }
+]

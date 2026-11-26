@@ -199,6 +199,42 @@ class AuditTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'cannot be changed'):
                 audit.ensure_immutable(self.root, base)
 
+    def _published_base(self, names):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        base = Path(temporary.name)
+        (base / 'packages').mkdir()
+        (base / 'provenance').mkdir()
+        # ensure_immutable 还会读 base 目录做版本/署名比较，缺目录会被判成清单缺失。
+        for name in audit.CATALOG_NAMES:
+            (base / name).write_text('[]', encoding='utf-8')
+        for name in names:
+            (base / 'packages' / name).write_bytes(b'published')
+            (base / 'provenance' / (name[:-len('.zip')] + '.json')).write_text('{}', encoding='utf-8')
+        return base
+
+    def test_unreferenced_old_package_and_orphan_provenance_can_be_deleted(self):
+        self.package()  # 候选只引用 sample-1.0.0
+        base = self._published_base(['old-1.0.0.zip'])
+        audit.ensure_immutable(self.root, base)
+
+    def test_package_still_referenced_cannot_be_deleted(self):
+        self.package()
+        base = self._published_base(['sample-1.0.0.zip'])
+        (self.root / 'packages/sample-1.0.0.zip').unlink()
+        with self.assertRaisesRegex(ValueError, 'cannot be deleted'):
+            audit.ensure_immutable(self.root, base)
+
+    def test_provenance_of_a_present_package_cannot_be_deleted(self):
+        self.package()
+        base = self._published_base(['sample-1.0.0.zip'])
+        # 包本身必须与 base 逐字节一致，才轮得到 provenance 的删除判定。
+        (base / 'packages/sample-1.0.0.zip').write_bytes(
+            (self.root / 'packages/sample-1.0.0.zip').read_bytes())
+        (self.root / 'provenance/sample-1.0.0.json').unlink()
+        with self.assertRaisesRegex(ValueError, 'cannot be deleted'):
+            audit.ensure_immutable(self.root, base)
+
     def test_snapshot_never_downloads_or_executes_candidate_scripts(self):
         tree = {'tree': [{'path': 'install.ps1', 'type': 'blob', 'mode': '100644', 'size': 5},
                          {'path': 'security/audit.py', 'type': 'blob', 'mode': '100644', 'size': 5}]}

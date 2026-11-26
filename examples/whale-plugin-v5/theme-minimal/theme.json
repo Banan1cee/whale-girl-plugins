@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "example-theme",
+  "name": "示例薄荷主题",
+  "author": "Your Name",
+  "version": "1.0.0",
+  "colors": {
+    "accent": "#6FD6C0",
+    "background": "#07120F",
+    "surface": "#101B18",
+    "text": "#F2FAF7"
+  },
+  "font": { "family": "Microsoft YaHei UI", "scale": 1.02 },
+  "metrics": { "corner": 10, "spacing": 1.0 }
+}

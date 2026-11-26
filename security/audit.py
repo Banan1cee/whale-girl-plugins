@@ -67,11 +67,25 @@ def snapshot(repo, commit, target):
     for item in tree['tree']:
         name = item['path']
         manifest = re.fullmatch(r'plugins/[a-z][a-z0-9-]{0,47}/plugin\.json', name)
-        if name not in CATALOG_NAMES and not name.startswith(('packages/', 'provenance/')) and not manifest:
+        # v5 display 由可信 build-index 从 README/market.json/图片派生，这些也必须作为
+        # 数据进入快照，否则派生出空 display 或漏图，静态门禁会看起来通过却没校验。
+        display = re.fullmatch(
+            r'plugins/[a-z][a-z0-9-]{0,47}/(?:README\.md|GUIDE\.md|market\.json|[\w.-]+\.(?:png|jpe?g|gif|webp))',
+            name, re.IGNORECASE)
+        if name not in CATALOG_NAMES and not name.startswith(('packages/', 'provenance/')) and not manifest and not display:
             continue
         safe_path(name)
         check(item['type'] == 'blob' and item['mode'] == '100644', 'market data must be ordinary files')
-        limit = 16 * 1024 * 1024 if name.startswith('packages/') else 8192 if manifest else 256 * 1024
+        if name.startswith('packages/'):
+            limit = 16 * 1024 * 1024
+        elif manifest:
+            limit = 8192
+        elif display and not name.lower().endswith('.md'):
+            limit = 64 * 1024
+        elif display:
+            limit = 64 * 1024
+        else:
+            limit = 256 * 1024
         check(item.get('size', limit + 1) <= limit, 'candidate file too large')
         total += item['size']
         check(total <= MAX_SNAPSHOT, 'candidate snapshot exceeds limit')
@@ -160,12 +174,59 @@ def provenance(root, entry, online):
             'source_scope': 'declared source; reproducible build not asserted'}
 
 
+REFERENCE_CATALOGS = (*CATALOG_NAMES, 'index-v5.json')
+
+
+def referenced_packages(root):
+    """候选任何目录仍在引用的包文件名（legacy 的 Id/Version 与 v5 的 package 字段）。
+
+    删除策略只认这个集合：包在候选里不存在时，只有没有任何目录再引用它才允许删除。
+    index-v5.json 只读其中的 package 文件名，不执行、不信任它的其它内容。
+    """
+    names = set()
+    for catalog in REFERENCE_CATALOGS:
+        path = root / catalog
+        if not path.is_file() or path.is_symlink():
+            continue
+        try:
+            data = json_data(path.read_bytes())
+        except ValueError:
+            # 目录本身格式有问题由 validate.py 报错，这里不放大成删除许可。
+            continue
+        if not isinstance(data, list):
+            continue
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            package = entry.get('package')
+            if isinstance(package, str):
+                names.add(Path(package).name)
+                continue
+            plugin_id, version = entry.get('Id'), entry.get('Version')
+            if isinstance(plugin_id, str) and isinstance(version, str):
+                names.add('%s-%s.zip' % (plugin_id, version))
+    return names
+
+
 def ensure_immutable(root, base):
     if base is None:
         return
+    # 已发布包默认不可变；只有“候选里已经没有任何目录引用”的旧包才允许删除，
+    # 避免把还能被安装的版本从市场里抽走。
+    referenced = referenced_packages(root)
     for old in (base / 'packages').glob('*.zip'):
         current = root / 'packages' / old.name
-        check(current.is_file() and current.read_bytes() == old.read_bytes(), 'published package cannot be changed or deleted: ' + old.name)
+        if current.is_file():
+            check(current.read_bytes() == old.read_bytes(), 'published package cannot be changed: ' + old.name)
+            continue
+        check(old.name not in referenced,
+              'published package cannot be deleted while a catalog still references it: ' + old.name)
+    for old in (base / 'provenance').glob('*.json'):
+        if (root / 'provenance' / old.name).is_file():
+            continue
+        package = old.name[:-len('.json')] + '.zip'
+        check(package not in referenced and not (root / 'packages' / package).exists(),
+              'published provenance cannot be deleted while its package is still referenced: ' + old.name)
     old_entries = {item['Id']: item for _, item in entries(base, legacy=True)}
     for _, item in entries(root):
         old = old_entries.get(item['Id'])

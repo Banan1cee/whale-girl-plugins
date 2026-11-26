@@ -1,22 +1,38 @@
 {
-  "Id": "care-plus",
-  "Name": "主动搭话增强",
-  "Author": "kelin",
-  "Version": "0.7.1",
-  "MinAppVersion": "4.1.2",
-  "Description": "【安装前必读】先在「插件市场」页顶部勾选「启用 JavaScript 插件（实验性，完整系统权限）」，再「插件市场 → 从本地安装」本 ZIP 并确认 system.full 授权；不开总开关插件不会被加载。需鲸鲸 4.1.2 或以上。接管官方主动搭话：支持主人私聊、其他人的私聊和群聊，收件人、时段、间隔、每天上限全部读官方「主动与提醒」页，启用即自动关掉官方 care，装上即用、无需配置。效果：搭话的提示词换成完整人设＋人物卡里未收尾的话题/事实/事件＋她自己日记的末段，不再是官方那 6 行独立模板；开口时机改成每次真随机（默认 25~300 分钟，群聊再乘 1.6），锚点是你最后一条消息的沉默时长，而不是上次搭话时间。于是不会刚聊完又按点冒一句，语气、长度、时间点每轮都不一样，明显降低「到点就发」的人机感。连续几次没被回还会改语气，该收手就收手。",
-  "ResultLabel": "试跑结果",
-  "Api": 4,
-  "Kind": "tool",
-  "Hooks": [
-    "app.start",
-    "timer.tick",
-    "app.stop",
-    "tool.run"
+  "format": "whale-plugin/1",
+  "level": 4,
+  "id": "care-plus",
+  "name": "主动搭话增强（4 级）",
+  "author": "kelin",
+  "version": "1.0.2",
+  "minAppVersion": "4.3.0",
+  "description": "保留随机沉默锚点、人物卡/日记话头与候选打分；因新协议读不到官方 care 设置，目标与时段改为插件内配置，且无法自动关闭官方 care。",
+  "entry": "plugin.js",
+  "runtime": "node-full",
+  "provides": {
+    "tool.run@1": { "mode": "tool", "scope": "manual" },
+    "task.tick@1": { "mode": "schedule", "scope": "all", "intervalSeconds": 300 }
+  },
+  "calls": [
+    "persona.read@1",
+    "memory.recent@1",
+    "model.complete@1",
+    "message.send@1",
+    "care.decide@1"
   ],
-  "Permissions": [
-    "system.full"
-  ],
-  "ExecutionTimeoutMs": 90000,
-  "IntervalSeconds": 300
+  "settingsSchema": {
+    "type": "object",
+    "properties": {
+      "targets": { "type": "string", "maxLength": 2000, "title": "目标", "description": "会话 ID，逗号分隔；空则使用 care.decide@1 给出的单个目标。" },
+      "windows": { "type": "string", "maxLength": 200, "title": "允许时段", "description": "如 10:00-23:59，逗号分隔多段；空表示不限。" },
+      "minIntervalMinutes": { "type": "integer", "minimum": 1, "maximum": 43200, "title": "最短沉默（分钟）" },
+      "maxIntervalMinutes": { "type": "integer", "minimum": 1, "maximum": 43200, "title": "最长沉默（分钟）" },
+      "maxPerDay": { "type": "integer", "minimum": 0, "maximum": 50, "title": "每天上限" },
+      "bootSilentMinutes": { "type": "integer", "minimum": 0, "maximum": 1440, "title": "启动静默（分钟）" },
+      "maxChars": { "type": "integer", "minimum": 12, "maximum": 200, "title": "单句字数" },
+      "dryRun": { "type": "boolean", "title": "只生成不发送" }
+    },
+    "additionalProperties": false
+  },
+  "executionTimeoutMs": 90000
 }

@@ -1,0 +1,5 @@
+{
+  "readme": "README.md",
+  "images": ["preview.png"],
+  "donation": { "afdian": "https://afdian.com/a/your-name" }
+}

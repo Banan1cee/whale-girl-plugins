@@ -1,10 +1,19 @@
 {
-  "Id": "text-counter",
-  "Name": "文本工具箱",
-  "Author": "Banan1cee",
-  "Version": "1.0.0",
-  "MinAppVersion": "4.1.0",
-  "Description": "统计输入文本的 UTF-8 字节数。适合检查文本体积。",
-  "ResultLabel": "UTF-8 字节数",
-  "Api": 1
+  "format": "whale-plugin/1",
+  "level": 1,
+  "id": "text-counter",
+  "name": "文本工具箱",
+  "author": "Banan1cee",
+  "version": "2.0.0",
+  "minAppVersion": "4.3.0",
+  "description": "统计输入文本的 UTF-8 字节数。适合检查文本体积。",
+  "entry": "plugin.wasm",
+  "runtime": "wasm-restricted",
+  "provides": {
+    "tool.run@1": {
+      "mode": "tool",
+      "scope": "manual"
+    }
+  },
+  "calls": []
 }

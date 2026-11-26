@@ -1,84 +1,44 @@
-# 鲸鲸随手记 · notes
+# 随手记（notes）2.0.2
 
-在微信里记东西，按内容自动归类，每个人只看得到自己的。
-
-基于鲸鲸 4.1.2 的 JavaScript 插件 API 4，权限声明 `system.full`，扩展点只有 `chat.generate`。
+- 等级：**4 级 · Node.js（node-full）**
+- 扩展点：`chat.generate@1`（replace / all）
+- 宿主能力：`message.send@1`（超长补发，排队）、`model.complete@1`（非命令消息交回原模型）
+- 最低客户端：4.3.0
+- 旧版对照：`legacy/plugin.json` + `legacy/plugin.js`（不参与打包）
 
 ## 命令
 
-```
-/record 内容        记一条，自动归类
-/read               看最近 10 条
-/read 今天          按时间看：今天 / 昨天 / 本周
-/read 待办          按类别看：待办 / 链接 / 代码 / 账目 / 想法 / 笔记
-/read 牛奶          按关键词搜，多个词用空格分开
-/read 3             读最近第 3 条全文
-/delete 牛奶        删除，命中多条会列编号
-/delete undo        撤销上一次删除
-/whoami             探测宿主交给插件的字段
-```
+`/record 内容`、`/read [今天|昨天|本周|类别|关键词|序号]`、`/delete 关键词`、`/delete undo`、`/whoami`。
+`/read`、`/delete` 只操作发送者自己的记录（按 `message.senderId` 隔离）。
 
-简写和全角斜杠都认，群里要先 @ 机器人。
+## 从旧版迁移的变化（逐条）
 
-## 归类规则
+1. **超长补发改为排队语义**：旧 `whale.sendText` 返回后当作已发；新版 `message.send@1` 只保证进入宿主发送通道（`queued`），因此提示文案改成「已排队/没发出去」，不再声称送达。
+2. **补发需要额外授权**：清单声明 `message.send@1`，安装/启用时需确认；未授权或调用失败时只回第一段并给翻页提示（旧版无此限制）。
+3. **删除候选状态从宿主 state 移到插件文件**：`state.json`（按 `chatId|senderId` 分键）。旧 state 与宿主消息处理同生命周期；新文件跨进程，极端并发下多轮可能互相覆盖。
+4. **非命令消息的回退方式变了**：旧版 `chat.generate` 返回 `{}` 表示「交还宿主」；新 replace 协议没有这个语义，改为调用 `model.complete@1` 生成原模型回复（多一次宿主能力调用，需要模型调用授权）。
+5. **`/whoami` 字段变少**：新协议 `message` 只有 platform/chatType/chatId/senderId/text 等固定字段，旧的 `conversationId/roomId/session` 等不再存在。
+6. **noteDir 收紧**：旧版允许绝对路径；新版只允许插件数据目录下的相对目录（安全收紧，绝对路径会退回 `note`）。
+7. **保留不变**：分类规则、索引与 Markdown 导出、去重、60 秒删除候选、24 小时 undo、身份隔离、只写本地不联网。
 
-按优先级从上到下，先命中先定：
+## 已知限制
 
-| 顺序 | 类别 | 判定依据 |
-| --- | --- | --- |
-| 1 | 账目 | `38 元`、`花了`、`报销`、`¥` |
-| 2 | 待办 | `记得`、`明天`、`要做`、`买`、`ddl` |
-| 3 | 链接 | 含 `http://` `https://` `b23.tv` `github.com` |
-| 4 | 代码 | 代码围栏，或行首 `function` `const` `def` `import` |
-| 5 | 想法 | `突然想到`、`点子`、`灵感` |
-| 6 | 笔记 | 都不沾的兜底 |
+- 未声明 `settings.write@1`：设置只由宿主卡片写入，插件只读。
+- `message.send@1` / `model.complete@1` 被用户拒绝授权时，插件会少掉补发或回退能力（不会静默篡改）。
 
-账目排在待办前面，因为金额是可精确判断的硬特征。「花了 38 元买咖啡」里的「买」不该把它抢到待办去。
+## 网络出口
 
-## 数据
+- **插件自身不建连接**：`plugin.js` 只 `require('node:fs')` 与 `require('node:path')`，没有 `fetch`/`net`/`http`/`dgram`，也不 `listen` 任何端口。
+- 需要网络的只有两条宿主能力，都走 `ctx.host.call`：`message.send@1`（`pushRemaining()`，把后面几段塞进宿主发送通道）与 `model.complete@1`（`hostReply()`，非命令消息交回原模型）。**是否真正出网、出到哪个地址由宿主与网关决定**，插件既不解析也不缓存网络细节。
+- 声明与实现一致：`plugin.json` 的 `calls` 只有这两个能力，`dataAccess` 只有 `model.prompt`、`chat.history`。
 
-全部写在插件数据目录的 `note/` 下：
+## 写文件是否原子
 
-```
-note/
-  index.json      索引，唯一真相源
-  todos.md        待办
-  links.md        链接
-  code.md         代码
-  money.md        账目
-  ideas.md        想法
-  memo.md         笔记
-```
+- 只写插件数据目录（`dataDir()` = 4 级 worker 的 `process.cwd()`）。`noteDir` 只接受该目录下的相对路径，填绝对路径会被忽略并回落到 `note/`（`noteDir()` 的路径判断）。
+- `note/state.json` 与 `note/index.json` 用「先写 `<file>.tmp`、再 `fs.renameSync`」（`writeState()`、`saveIndex()`）；rename 抛错时退回直接覆盖原文件再删 `.tmp`。**同目录 rename 是原子的，这条降级路径不是**。
+- 分类导出的 `note/money.md`、`todos.md`、`links.md`、`code.md`、`ideas.md`、`memo.md` 由 `renderCatFile()` 用 `fs.writeFileSync` 直接覆盖，**不原子**；内容与旧文件逐字节相同时跳过写入。
+- **未做**：没有 `fsync`、没有文件锁、没有跨进程互斥。宿主并发跑两轮时可能互相覆盖 state/index（见差异 3）。`index.json` 解析失败会被改名成 `index.broken-<时间戳>.json` 留在原目录（`loadIndex()`），这是改名不是删除。
 
-md 按类别导出，用记事本直接能看，每条带完整日期和记录人。手改 md 会在下次记录时被覆盖，要改改 `index.json`。
+## 聊天数据声明
 
-## 多人隔离
-
-每条记录存 `by`（wxid），`/read` 和 `/delete` 都按它过滤。群里五个人共用一个机器人，各自只出自己那份，搜索、编号、撤销也只在自己范围内算。
-
-拿不到 wxid 时直接拒绝读，宁可读不到也不要把几个人的混在一起。
-
-## 边界
-
-- **不联网**：代码里没有 `fetch`、`http`、`https`、`WebSocket`
-- **不调模型**：没有 `whale.model`
-- **不写日志**
-- **只写一处**：`whale.paths.pluginData/note/`，命令不接受路径参数，文件名全部来自内部固定的类别枚举
-- **不带密钥**
-
-## 安装
-
-先在鲸鲸「插件市场」页顶部勾选「启用 JavaScript 插件（实验性，完整系统权限）」，再从「插件市场 → 从本地安装」装 ZIP，确认 `system.full` 授权。
-
-不打开总开关插件不会被加载，也不会有任何报错，表现就是发命令完全没反应。
-
-## 仓库结构
-
-```
-plugins/notes/plugin.json    清单
-plugins/notes/plugin.js      源码
-```
-
-## 许可
-
-个人使用。转载或修改请保留作者信息。
+清单明确申请 `model.prompt` 与 `chat.history`：生成替换及模型回退会使用本轮系统提示词与会话输入。启用时按声明披露，未授权时宿主不会下发 system，turns 为空数组。

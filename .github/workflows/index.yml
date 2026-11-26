@@ -1,7 +1,7 @@
 name: index
 
 # 目录（index*.json）不再由投稿人手改，统一从 plugins/ + packages/ 生成：
-#   · PR：在临时副本里生成目录并跑 validate.py，作者只提交插件源码和 ZIP；
+#   · PR：用可信 base 的 build-index.js 在临时副本里生成目录，候选只提供数据；
 #   · main：自动把生成结果提交回仓库，避免目录和包长期漂移。
 on:
   pull_request:
@@ -20,23 +20,53 @@ permissions:
 
 jobs:
   validate-generated:
-    name: 生成目录并校验（PR）
+    name: 生成目录并校验（PR，候选仅作数据）
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          path: candidate
+          fetch-depth: 1
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: 在临时副本里生成并校验
+      - name: 在临时副本里用可信脚本生成并校验
+        env:
+          PYTHONUTF8: '1'
         run: |
           set -euo pipefail
-          rm -rf /tmp/market
-          cp -r . /tmp/market
-          cd /tmp/market
+          # 候选 .git 不作为数据带入临时副本；更新时间缺失是诚实降级，
+          # 校验器接受缺省，但不接受无法核实的伪造时间。
+          rm -rf "$RUNNER_TEMP/market"
+          cp -a trusted "$RUNNER_TEMP/market"
+          rm -rf "$RUNNER_TEMP/market/.git"
+          if [ -d candidate ]; then
+            for path in plugins packages provenance; do
+              if [ -e "candidate/$path" ] && find "candidate/$path" -type l -print -quit | grep -q .; then
+                echo "symlinks are not allowed in candidate data: $path"
+                exit 1
+              fi
+            done
+          fi
+          for path in plugins packages provenance discussion-issues.json; do
+            rm -rf "$RUNNER_TEMP/market/$path"
+            if [ -e "candidate/$path" ]; then cp -a "candidate/$path" "$RUNNER_TEMP/market/$path"; fi
+          done
+          cd "$RUNNER_TEMP/market"
           node scripts/build-index.js
           python validate.py
 
@@ -48,6 +78,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '20'

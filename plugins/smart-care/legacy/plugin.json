@@ -1,0 +1,101 @@
+{
+  "Id": "smart-care",
+  "Name": "智能搭话",
+  "Author": "Jy-Levent",
+  "Version": "1.1.1",
+  "MinAppVersion": "4.1.2",
+  "Description": "让鲸鲸主动搭话带真实热点，还会因为被无视而逐渐生气。① 点名搭话：私聊发「去找 tree 搭话」，给指定联系人发带上下文的关心话（昵称反查 wxid、真实昵称定位、回执可见；昵称带点号如「几度雨停.」也能识别）。② 定时搭话：跟随本体「主动与提醒」开关（开→插件工作、关→插件停），按本体时间窗/白名单自动发，直连 DeepSeek Search API 拿网页正文+AI 动态搜索角度+时效限定，说出「新角色菈乌玛你抽了吗」这种有料的话；用共享账本软压本体避免双发，生气或达每日上限时自动停发。③ 被无视会生气（按时间三级、按人隔离——谁没回她她生谁的气，不会波及别人）：streak≥2 且沉默超30分钟才发作，每级只发一条——level1 有点不爽→level2 真火大→level3 心寒；生气中停止定时搭话，level3 发完心寒话后永久静默，只有对方道歉才能消气；生气话同样进「最近动态」，不输出情绪标签。搭话与生气自动错开间隔（默认10分钟），不会连发两条。所有失败自动退回、不吞消息。兴趣从人设动态提取，改人设即生效。需 DeepSeek Key（用宿主 websearch 配置）。",
+  "ResultLabel": "智能搭话",
+  "Api": 4,
+  "Kind": "message",
+  "Hooks": [
+    "timer.tick",
+    "chat.generate",
+    "chat.prompt",
+    "chat.search"
+  ],
+  "Permissions": [
+    "system.full"
+  ],
+  "ExecutionTimeoutMs": 45000,
+  "IntervalSeconds": 60,
+  "Settings": [
+    {
+      "Key": "enabled",
+      "Name": "启用",
+      "Type": "boolean",
+      "Default": true,
+      "Description": "关闭后插件完全不干预"
+    },
+    {
+      "Key": "minIntervalMinutes",
+      "Name": "搜索最小间隔（分钟）",
+      "Type": "number",
+      "Default": 30,
+      "Description": "两次强制搜索之间的最短间隔"
+    },
+    {
+      "Key": "maxPerHour",
+      "Name": "每小时搜索上限",
+      "Type": "number",
+      "Default": 4,
+      "Description": "限制联网预算"
+    },
+    {
+      "Key": "careInterestChance",
+      "Name": "搭话带兴趣话题的概率(%)",
+      "Type": "number",
+      "Default": 90,
+      "Description": "点名和定时搭话共用：按人设兴趣搜近况来开场话的概率；其余走普通关心，搜索失败也会退回普通关心"
+    },
+    {
+      "Key": "autoCare",
+      "Name": "接管定时主动搭话",
+      "Type": "boolean",
+      "Default": true,
+      "Description": "按本体 config.care 的时间窗/间隔/白名单，到点自动发一条带兴趣话题的搭话，并写入共享账本让本体少发；本体配置一行不用改"
+    },
+    {
+      "Key": "angryEnabled",
+      "Name": "被无视会生气",
+      "Type": "boolean",
+      "Default": true,
+      "Description": "连续 N 次主动搭话没人回，就按人设生气：有人说话时带怒气口吻回复，或主动发一句抱怨到原会话"
+    },
+    {
+      "Key": "ignoreThreshold",
+      "Name": "连续几次没回才生气",
+      "Type": "number",
+      "Default": 2,
+      "Description": "连续这么多次主动搭话被无视后触发生气，1~10"
+    },
+    {
+      "Key": "ignoreWindowMinutes",
+      "Name": "多久没回算被无视（分钟）",
+      "Type": "number",
+      "Default": 20,
+      "Description": "搭话后这么多分钟内目标没回话就算被无视一次，1~240。改短→更快判定更快生气"
+    },
+    {
+      "Key": "outboundGapMinutes",
+      "Name": "搭话/生气间隔（分钟）",
+      "Type": "number",
+      "Default": 10,
+      "Description": "搭话和生气两类主动消息之间的最小间隔，0~240；避免同一轮连发两条，默认10分钟"
+    },
+    {
+      "Key": "angryStartDelayMinutes",
+      "Name": "生气触发延迟（分钟）",
+      "Type": "number",
+      "Default": 30,
+      "Description": "累计被无视达阈值后，还要再沉默这么久才真正开始生气，1~720。默认30"
+    },
+    {
+      "Key": "angryLevelUpMinutes",
+      "Name": "生气升级间隔（分钟）",
+      "Type": "number",
+      "Default": 60,
+      "Description": "生气后每满这么久升一级（L1→L2→L3），5~720。默认60"
+    }
+  ]
+}
