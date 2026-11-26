@@ -107,7 +107,7 @@
     "ExecutionTimeoutMs": 120000,
     "IntervalSeconds": 10,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/breezeblue-sing-1.0.4.1.zip",
-    "Sha256": "0e96296394ff51a5ada98c00e58b593afc1b076c199f5cb4a9bc4ac68d13a6c5"
+    "Sha256": "4c2d3540b5b041c7c757e8f6bebb226455362232c27e89f7c5e480f8d9f8dadd"
   },
   {
     "Id": "care-plus",

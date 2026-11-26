@@ -983,6 +983,7 @@ async function proactiveLibrarySend(whale, settings, state, targets) {
         try {
           await whale.sendText(target.id, call + '我唱了《' + pending.song + '》，你喜欢吗？',
             { name: target.name, chatType: target.chatType });
+          queueMemoryNote(target, call + '我唱了《' + pending.song + '》，你喜欢吗？');
         } catch { /* 文件已送达，留言失败不重发文件 */ }
       }
     }
@@ -1061,6 +1062,7 @@ async function proactiveTick(whale, settings, orders, allowStart) {
           const call = target.title ? target.title + '，' : '';
           await whale.sendText(target.id, call + '我唱了《' + job.song + '》，你喜欢吗？',
             { name: target.name, chatType: target.chatType });
+          queueMemoryNote(target, call + '我唱了《' + job.song + '》，你喜欢吗？');
         }
       }
       return false;
@@ -1436,12 +1438,62 @@ function voiceTargetForMessage(whale, message) {
   return resolveVoiceTarget(whale, id, '', type);
 }
 
+
+const MEMORY_PENDING = path.join(__dirname, 'memory-pending.json');
+
+function readMemoryPending() {
+  try {
+    const value = JSON.parse(fs.readFileSync(MEMORY_PENDING, 'utf8'));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch { return {}; }
+}
+
+function writeMemoryPending(value) {
+  try {
+    const temp = MEMORY_PENDING + '.' + crypto.randomUUID() + '.tmp';
+    fs.writeFileSync(temp, JSON.stringify(value), { flag: 'wx', mode: 0o600 });
+    fs.renameSync(temp, MEMORY_PENDING);
+  } catch { /* 记忆失败不影响发送 */ }
+}
+
+function queueMemoryNote(target, summary) {
+  if (!target || !target.id || target.chatType !== 'private' || !summary) return;
+  const pending = readMemoryPending();
+  pending[target.id] = { chatType: 'private', summary: String(summary).slice(0, 180), at: Date.now() };
+  writeMemoryPending(pending);
+}
+
+async function rememberPluginText(whale, chatType, text, title = '翻唱') {
+  if (chatType !== 'private' || !text) return false;
+  try {
+    if (!whale?.memory?.recordEvent) return false;
+    await whale.memory.recordEvent({
+      title: String(title).slice(0, 24),
+      summary: String(text).slice(0, 180),
+      keywords: ['翻唱'], importance: 0.5,
+    });
+    return true;
+  } catch { return false; }
+}
+
+async function flushMemoryNote(whale, message) {
+  if (!message || message.chatType !== 'private') return;
+  const chatId = String(message.senderId || message.chatId || '');
+  const pending = readMemoryPending();
+  const note = pending[chatId];
+  if (!note) return;
+  delete pending[chatId];
+  writeMemoryPending(pending);
+  await rememberPluginText(whale, 'private', note.summary, '翻唱');
+}
+
 async function reply(whale, message, text) {
   try {
     await whale.sendText(chatFor(message), text, {
       name: nameFor(message),
       chatType: message.chatType === 'group' ? 'group' : 'private',
     });
+    await rememberPluginText(whale, message.chatType === 'group' ? 'group' : 'private', text);
   } catch { /* 桥没起时静默，别把插件挂掉 */ }
 }
 
@@ -2078,6 +2130,9 @@ module.exports = {
   parseSongRelay,
   pickLikedSong,
   proactiveLibrarySend,
+  rememberPluginText,
+  queueMemoryNote,
+  flushMemoryNote,
   loadSynthLibrary,
   findSynthEntry,
   relayTargetText,
@@ -2087,6 +2142,7 @@ module.exports = {
       const message = input.message || {};
       const settings = input.settings || {};
       if (!whale || !message.text || (message.platform && message.platform !== 'wechat')) return { action: 'pass' };
+      await flushMemoryNote(whale, message);
       const choiceText = cleanText(message.text).normalize('NFKC');
       const format = LONG_FORMAT.exec(choiceText);
       if (format) {
