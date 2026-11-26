@@ -688,7 +688,6 @@ async function deliverReady(whale, settings, order, state) {
 const PROACTIVE_VIA = 'breezeblue-proactive';
 const PROACTIVE_STATE = path.join(__dirname, 'proactive-state.json');
 const PROACTIVE_TTL = 200 * 60 * 1000;
-const workerStartedAt = Date.now();
 
 function readProactive() {
   try {
@@ -770,8 +769,8 @@ async function proactiveContext(whale, settings, now) {
   const idleMs = Math.max(5, Number(settings.proactiveIdleMinutes ?? 120)) * 60000;
   if (!bridge?.online || !bridge.uia || bridge.accountGuard !== true || bridge.accountOk !== true
     || !bridge.account || !Number.isFinite(last)) return null;
-  // 刚启动且尚未收过消息时，从插件启动开始计空闲时间。
-  if (now - (last > 0 ? last : workerStartedAt) < idleMs) return null;
+  // 刚启动时没有 lastMessageAt（0），没有消息本身也按空闲处理。
+  if (last > 0 && now - last < idleMs) return null;
   const plugins = (await whale.api('/api/plugins/status'))?.body?.items;
   if (!Array.isArray(plugins) || plugins.some(item => item.id === 'breeze-proactive')) return null;
   const master = (await whale.api('/api/config'))?.body?.config?.persona?.master;
@@ -858,36 +857,28 @@ async function pickLikedSong(settings, state) {
   const root = runtimeRoot(settings);
   const python = settings.python || path.join(root, 'engine', 'venv', 'Scripts', 'python.exe');
   const cookies = settings.neteaseCookies || path.join(root, 'cookies.txt');
-  if (!fs.existsSync(cookies)) return null;
   const cache = path.join(root, 'cache');
   try { fs.mkdirSync(cache, { recursive: true }); } catch { /* ignore */ }
   const seen = (state && state.songs) || {};
-  const deadline = Date.now() + 75000;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const remaining = deadline - Date.now();
-    if (remaining < 1000) break;
-    const out = path.resolve(cache, 'liked-' + crypto.randomUUID() + '.mp3');
+    const out = path.join(cache, 'liked-' + Date.now() + '-' + attempt + '.mp3');
     const data = await new Promise(resolve => {
       execFile(python, [fetcher, '--liked', '--pick', 'random', '--out', out], {
-        timeout: Math.min(45000, remaining), maxBuffer: 2 * 1024 * 1024, windowsHide: true,
+        timeout: 240000, maxBuffer: 2 * 1024 * 1024, windowsHide: true,
         env: { ...process.env, BREEZE_COOKIES: cookies, PYTHONIOENCODING: 'utf-8' },
       }, (error, stdout) => {
-        if (error) { resolve(null); return; }
         const line = String(stdout || '').trim().split('\n').filter(Boolean).pop() || '';
         try { resolve(JSON.parse(line)); } catch { resolve({ ok: false }); }
       });
     });
-    if (!data?.ok || !data.path || path.resolve(String(data.path)) !== out || !fs.existsSync(out)) {
-      try { fs.unlinkSync(out); } catch { /* 本轮没有留下下载文件 */ }
-      continue;
-    }
+    if (!data?.ok || !data.path || !fs.existsSync(String(data.path))) continue;
     const title = String(data.title || '').trim();
     const key = normName(title);
-    if (!key || Object.hasOwn(seen, key)) {
-      try { fs.unlinkSync(out); } catch { /* 本轮缓存已不存在 */ }
+    if (key && Object.hasOwn(seen, key)) {
+      try { fs.unlinkSync(String(data.path)); } catch { /* ignore */ }
       continue;
     }
-    return { name: title.slice(0, 100), artist: String(data.artist || '').trim(), file: out };
+    return { name: title.slice(0, 100), artist: String(data.artist || '').trim(), file: String(data.path) };
   }
   return null;
 }
@@ -907,18 +898,133 @@ async function handleLikedOrder(whale, message, settings) {
   try { fs.mkdirSync(songsDir, { recursive: true }); } catch { /* ignore */ }
   const safeName = liked.name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'liked';
   const localFile = path.join(songsDir, safeName + '.mp3');
-  try { fs.copyFileSync(liked.file, localFile, fs.constants.COPYFILE_EXCL); } catch { /* 保留用户已有音源 */ }
+  try { fs.copyFileSync(liked.file, localFile); } catch { /* 仍可由下载器重新取 */ }
   const out = await runCover(settings, ['order', '--song', liked.name, '--artist', liked.artist,
     '--requester', nameFor(message), '--via', message.chatType === 'group' ? 'group' : 'private',
     '--chat-type', message.chatType === 'group' ? 'group' : 'private',
     '--engine', settings.engine || 'seedvc', '--group-id', chatFor(message),
-    '--group-name', target.name, '--wxid', String(message.senderId || '')], 15000);
+    '--group-name', target.name], 15000);
   if (!out?.ok || !out.order?.id) {
     await reply(whale, message, '这首歌没排上，等会儿再试吧。');
     return;
   }
   const where = target.chatType === 'group' ? '发到群里' : '发给你';
   await reply(whale, message, `收到～从「我喜欢的音乐」随机挑到《${liked.name}》，排第 ${out.position || 1} 位，做好${where}。`);
+}
+
+const SYNTH_LIBRARY = path.join(__dirname, 'synth-library');
+
+function findSynthEntry(settings, wanted) {
+  const key = normName(wanted);
+  if (!key) return null;
+  return loadSynthLibrary(settings).find(entry => normName(entry.title) === key
+    || (Array.isArray(entry.aliases) && entry.aliases.some(alias => normName(alias) === key))) || null;
+}
+
+function loadSynthLibrary(settings) {
+  try {
+    const root = settings?.synthLibraryDir || SYNTH_LIBRARY;
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+    return (Array.isArray(manifest.entries) ? manifest.entries : []).filter(entry =>
+      entry && typeof entry.id === 'string' && typeof entry.title === 'string'
+      && typeof entry.durationSec === 'number' && entry.durationSec > 0
+      && typeof entry.libraryPath === 'string'
+      && fs.existsSync(entry.libraryPath));
+  } catch { return []; }
+}
+
+function librarySentFor(state, entry, target) {
+  return state.librarySent?.[entry.id]?.[target.id] || null;
+}
+
+function markLibrarySent(state, entry, target, info) {
+  const table = { ...(state.librarySent || {}) };
+  table[entry.id] = { ...(table[entry.id] || {}), [target.id]: { at: Date.now(), ...info } };
+  state.librarySent = table;
+}
+
+function createLibraryOrder(settings, entry, target, options = {}) {
+  const id = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+  const root = dataRoot(settings);
+  const work = path.join(root, 'work', id);
+  fs.mkdirSync(work, { recursive: true });
+  const audio = path.join(work, 'cover.wav');
+  fs.copyFileSync(entry.libraryPath, audio);
+  const now = new Date().toISOString();
+  const order = {
+    id, song: entry.title, artist: '', note: '', requester: options.requester || '鲸鲸',
+    wxid: options.wxid || target.id, via: options.via || PROACTIVE_VIA, chatType: target.chatType, engine: 'seedvc',
+    group: { id: target.id, name: target.name || '' },
+    source: audio, status: 'ready', hasAudio: true, durationSec: entry.durationSec,
+    fullTrack: true, audio, audioParts: [], profile: 'daily', createdAt: now, updatedAt: now,
+    events: [{ at: now, status: 'ready', note: '已合成库复用' }],
+  };
+  const dir = path.join(root, 'orders');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, id + '.json');
+  fs.writeFileSync(file, JSON.stringify(order, null, 2), 'utf8');
+  return { id, order, file };
+}
+
+async function proactiveLibrarySend(whale, settings, state, targets) {
+  if (settings.proactiveLibrary === false || !targets?.length) return false;
+  const entries = loadSynthLibrary(settings);
+  if (!entries.length) return false;
+  if (state.libraryPending) {
+    const pending = state.libraryPending;
+    let receipt = null;
+    try { receipt = await whale.delivery(pending.deliveryId); } catch { /* ignore */ }
+    if (['queued', 'sending'].includes(receipt?.status)) return true;
+    const confirmed = receipt?.confirmed === true && receipt?.status === 'confirmed';
+    if (confirmed && pending.targetId && pending.song) {
+      const target = targets.find(item => item.id === pending.targetId);
+      if (target) {
+        const call = target.title ? target.title + '，' : '';
+        try {
+          await whale.sendText(target.id, call + '我唱了《' + pending.song + '》，你喜欢吗？',
+            { name: target.name, chatType: target.chatType });
+        } catch { /* 文件已送达，留言失败不重发文件 */ }
+      }
+    }
+    const entry = entries.find(item => item.id === pending.entryId);
+    const target = targets.find(item => item.id === pending.targetId);
+    if (entry && target) markLibrarySent(state, entry, target,
+      { status: confirmed ? 'sent' : (receipt?.status || 'uncertain'), orderId: pending.orderId, mode: 'wav' });
+    delete state.libraryPending;
+    saveProactive(state);
+    return true;
+  }
+  if (settings.proactiveDryRun === true) return false;
+  for (const target of targets) {
+    const entry = entries.find(item => !librarySentFor(state, item, target));
+    if (!entry) continue;
+    if (entry.durationSec > 120) {
+      const made = createLibraryOrder(settings, entry, target);
+      let delivery = null;
+      try { delivery = await whale.send({ type: 'sing-wav', orderId: made.id }); }
+      catch (error) {
+        markLibrarySent(state, entry, target, { status: 'failed', orderId: made.id, mode: 'wav' });
+        saveProactive(state);
+        return true;
+      }
+      state.libraryPending = {
+        entryId: entry.id, targetId: target.id, song: entry.title, orderId: made.id,
+        deliveryId: delivery?.id || '', at: Date.now(),
+      };
+      saveProactive(state);
+      return true;
+    }
+    const file = deliveryFile(settings, madeIdSafe(entry), target, 'library');
+    const status = sendCoverFile(settings, target, entry.libraryPath, file, 'library');
+    markLibrarySent(state, entry, target, { status, mode: 'voice' });
+    saveProactive(state);
+    return true;
+  }
+  return false;
+}
+
+function madeIdSafe(entry) {
+  return 'lib-' + String(entry.id || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 24);
 }
 
 async function proactiveTick(whale, settings, orders, allowStart) {
@@ -1006,6 +1112,7 @@ async function proactiveTick(whale, settings, orders, allowStart) {
     || order.status === 'making' && now - Date.parse(order.updatedAt) < PROACTIVE_TTL)) return false;
   const targets = await proactiveContext(whale, settings, now);
   if (!targets) return false;
+  if (await proactiveLibrarySend(whale, settings, state, targets)) return true;
   const target = targets[(Number(state.cursor) || 0) % targets.length];
   if (settings.proactiveLiked === true) {
     const liked = await pickLikedSong(settings, state);
@@ -1344,6 +1451,17 @@ function okText(order, position) {
   return `收到～《${order.song}》${tail}，我自己找原曲，做好发语音。`;
 }
 
+
+async function recordCoverMemory(whale, message, title, detail = '') {
+  try {
+    const summary = (detail || '已在当前会话发送翻唱成品') + '《' + title + '》';
+    await whale.memory.recordEvent({
+      title: '翻唱', summary,
+      keywords: ['翻唱', title].filter(Boolean), importance: 0.55,
+    });
+  } catch { /* 群聊/无权限时不影响发送 */ }
+}
+
 async function handleOrder(whale, message, settings, parsed) {
   const me = String(message.senderName || message.senderId || '群友');
   const key = [message.chatId, message.senderId || me, message.msgId || parsed.song].join('|');
@@ -1351,6 +1469,40 @@ async function handleOrder(whale, message, settings, parsed) {
   for (const [k, ts] of recent) if (now - ts > 60000) recent.delete(k);
   if (recent.has(key)) return true;
   recent.set(key, now);
+
+  const existing = findSynthEntry(settings, parsed.song);
+  if (existing) {
+    const chat = await voiceTargetForMessage(whale, message);
+    if (!chat) {
+      await reply(whale, message, '我没能确认微信会话标题，先不发。');
+      return true;
+    }
+    if (existing.durationSec <= 120) {
+      const file = deliveryFile(settings, 'lib-' + existing.id, chat, 'point');
+      let status = 'failed';
+      try { status = sendCoverFile(settings, chat, existing.libraryPath, file, 'point'); } catch { /* ignore */ }
+      await reply(whale, message, status === 'sent' || status === 'pending'
+        ? `《${existing.title}》已经做好了，直接发成品，不重做。`
+        : `《${existing.title}》成品发送暂时没确认，先不重做，等会儿再试。`);
+      await recordCoverMemory(whale, message, existing.title, '复用成品');
+      return true;
+    }
+    const made = createLibraryOrder(settings, existing, chat, {
+      via: message.chatType === 'group' ? 'group' : 'private',
+      wxid: String(message.senderId || chat.id), requester: me,
+    });
+    const state = loadAuto();
+    state.active = null;
+    state.longFormats = { ...(state.longFormats || {}),
+      [made.id]: { status: 'offered', at: Date.now() } };
+    if (!saveAuto(state)) {
+      await reply(whale, message, '成品记录写不进去，先不重做。');
+      return true;
+    }
+    await offerLongFormat(whale, made.order, state);
+    await recordCoverMemory(whale, message, existing.title, '复用成品，等待格式选择');
+    return true;
+  }
 
   const args = [
     'order',
@@ -1624,9 +1776,9 @@ function parseSongRelay(text) {
     const sing = /^(?:帮我|请)?\s*唱\s*(?:首|一首)?\s*《?([^》]{1,100}?)》?\s*(?:给|送给)\s*(.{1,60}?)\s*(?:听|吧|呗)?$/.exec(command);
     if (sing) { song = relayText(sing[1]); target = relayText(sing[2]); }
   }
-  // 给某人唱《歌名》、去某群唱《歌名》
+  // 给某人唱《歌名》
   if (!target) {
-    const to = /^(?:帮我|请)?\s*(?:给|替|帮|去|到|在)\s*(.{1,60}?)\s*唱\s*(?:首|一首)?\s*《?([^》]{1,100}?)》?$/u.exec(command);
+    const to = /^(?:帮我|请)?\s*(?:给|替|帮)\s*(.{1,60}?)\s*唱\s*(?:首|一首)?\s*《?([^》]{1,100}?)》?$/.exec(command);
     if (to) { target = relayText(to[1]); song = relayText(to[2]); }
   }
   // 唱/放 一首给某人听
@@ -1700,31 +1852,20 @@ function saveRelay(file, job) {
   }
 }
 
-function canReuseRelayOrder(settings, order, owner, privateChatId) {
-  if (!order || !/^[0-9a-f]{8}$/i.test(order.id) || order.engine !== 'seedvc'
-    || !['ready', 'delivered'].includes(order.status) || order.via !== 'private'
-    || order.chatType !== 'private' || order.group?.id !== privateChatId || order.wxid !== owner) return false;
-  const parts = playlistParts(order);
-  if (!parts || !order.audio) return false;
+async function resolveRelayLastSong(settings, owner) {
   try {
-    const root = fs.realpathSync(dataRoot(settings));
-    const work = path.join(root, 'work', order.id);
-    if (fs.realpathSync(work) !== work) return false;
-    return [order.audio, ...parts.map(part => part.audio)].every(file => {
-      const resolved = fs.realpathSync(path.resolve(root, file));
-      const relative = path.relative(work, resolved);
-      return relative && !path.isAbsolute(relative) && relative !== '..'
-        && !relative.startsWith('..' + path.sep) && /[.]wav$/i.test(relative) && fs.statSync(resolved).isFile();
-    });
-  } catch { return false; }
-}
-
-async function resolveRelayLastSong(settings, owner, privateChatId) {
-  try {
-    const out = await runCover(settings, ['list', '--status', 'ready,delivered', '--newest', '--limit', '200'], 5000);
+    const out = await runCover(settings, ['list', '--limit', '200'], 5000);
     const orders = Array.isArray(out?.orders) ? out.orders : [];
-    return orders.find(order => canReuseRelayOrder(settings, order, owner, privateChatId)) || null;
-  } catch { return null; }
+    const ready = orders.filter(order => order && order.audio
+      && ['ready', 'delivered'].includes(order.status));
+    const owned = ready.filter(order => String(order.group?.id || '') === String(owner)
+      || String(order.requester || '') === String(owner));
+    const pool = owned.length ? owned : ready;
+    pool.sort((a, b) => Date.parse(b.updatedAt || b.createdAt || 0) - Date.parse(a.updatedAt || a.createdAt || 0));
+    return String(pool[0]?.song || '');
+  } catch {
+    return '';
+  }
 }
 
 async function relayOwnerTitle(whale, owner) {
@@ -1754,21 +1895,18 @@ async function handleSongRelay(whale, message, settings, intent) {
     const cancelCode = intent.type === '唱歌取消';
 
     if (intent.type === 'request') {
+      let song = intent.song;
+      if (song === RELAY_LAST) {
+        song = await resolveRelayLastSong(settings, owner);
+        if (!song) {
+          await reply(whale, message, '最近还没有唱好的歌，先点一首吧。');
+          return true;
+        }
+      }
       const target = await relayContext(whale, settings, owner, intent.target);
       if (!target) {
         await reply(whale, message, '我没确认到这个目标或账号，先不发。可以说“唱《歌名》给谁听”。');
         return true;
-      }
-      let song = intent.song;
-      let sourceOrderId = '';
-      if (song === RELAY_LAST) {
-        const last = await resolveRelayLastSong(settings, owner, from.id);
-        if (!last?.song) {
-          await reply(whale, message, '这个私聊里还没有你点过的整首成品。你告诉我歌名，我重新唱一遍吧。');
-          return true;
-        }
-        song = last.song;
-        sourceOrderId = last.id;
       }
       if (existing?.sourceMessage && message.msgId === existing.sourceMessage) return true;
       if (['confirmed', 'allocating', 'rendering', 'sending'].includes(existing?.state)) {
@@ -1778,7 +1916,7 @@ async function handleSongRelay(whale, message, settings, intent) {
       const code = crypto.randomBytes(3).toString('hex');
       const ownerTitle = await relayOwnerTitle(whale, owner);
       saveRelay(file, { state: 'draft', code, owner, ownerTitle, from, target, targetWord: intent.target,
-        song, sourceOrderId, originChat: message.chatId, sourceMessage: message.msgId, expires: Date.now() + RELAY_TTL });
+        song, originChat: message.chatId, sourceMessage: message.msgId, expires: Date.now() + RELAY_TTL });
       const where = target.chatType === 'group'
         ? `唱到「${target.name}」里`
         : `唱给${intent.target}听`;
@@ -1852,20 +1990,16 @@ async function finishSongRelay(whale, file, job, status, completed) {
   }
 }
 
-function matchesRelaySource(settings, order, job) {
-  return canReuseRelayOrder(settings, order, job.owner, job.from?.id)
-    && normName(order.song) === normName(job.song)
-    && (!job.sourceOrderId || job.sourceOrderId === order.id);
-}
-
-async function findRelayReusable(settings, job) {
-  if (job.sourceOrderId) {
-    const order = readRuntimeOrder(settings, job.sourceOrderId);
-    return matchesRelaySource(settings, order, job) ? order : null;
-  }
-  const out = await runCover(settings, ['list', '--status', 'ready,delivered', '--newest', '--limit', '200'], 5000);
-  const orders = Array.isArray(out?.orders) ? out.orders : [];
-  return orders.find(order => matchesRelaySource(settings, order, job)) || null;
+async function findRelayReusable(settings, song) {
+  const out = await runCover(settings, ['list', '--status', 'ready', '--limit', '200'], 5000);
+  const key = normName(song);
+  const pool = (Array.isArray(out?.orders) ? out.orders : []).filter(order =>
+    order && order.status === 'ready' && order.fullTrack === true
+    && Array.isArray(order.audioParts) && order.audioParts.length > 0 && order.audio
+    && normName(order.song) === key && playlistParts(order)
+    && fs.existsSync(path.resolve(dataRoot(settings), String(order.audio))));
+  pool.sort((a, b) => Date.parse(b.updatedAt || b.createdAt || 0) - Date.parse(a.updatedAt || a.createdAt || 0));
+  return pool[0] || null;
 }
 
 async function processSongRelays(whale, settings) {
@@ -1889,13 +2023,9 @@ async function processSongRelays(whale, settings) {
           await finishSongRelay(whale, file, job, 'stopped', 0);
           return true;
         }
-        const reusable = await findRelayReusable(settings, job);
+        const reusable = await findRelayReusable(settings, job.song);
         if (reusable) {
           saveRelay(file, { ...job, state: 'sending', orderId: reusable.id, reuse: true, startedAt: job.startedAt || Date.now() });
-          return true;
-        }
-        if (job.sourceOrderId) {
-          await finishSongRelay(whale, file, job, 'stopped', 0);
           return true;
         }
         saveRelay(file, { ...job, state: 'allocating' });
@@ -1912,12 +2042,11 @@ async function processSongRelays(whale, settings) {
         return true;
       }
       const order = readRuntimeOrder(settings, job.orderId);
-      const match = Boolean(order) && (job.reuse === true
-        ? matchesRelaySource(settings, order, job)
-        : order.via === RELAY_SONG_VIA && order.group?.id === job.target.id);
+      const match = Boolean(order) && ((job.reuse === true && order.id === job.orderId)
+        || (order.via === RELAY_SONG_VIA && order.group?.id === job.target.id));
       if (match && ['pending', 'making'].includes(order.status)
         && Date.now() - job.startedAt < 205 * 60 * 1000 && prepStatus(settings, order.id)?.status !== 'error') return true;
-      if (!match || !['ready', 'delivered'].includes(order.status) || !order.fullTrack || !playlistParts(order)) {
+      if (!match || order.status !== 'ready' || !order.fullTrack || !playlistParts(order)) {
         await finishSongRelay(whale, file, job, 'stopped', 0);
         return true;
       }
@@ -1948,6 +2077,9 @@ module.exports = {
   parseOrder,
   parseSongRelay,
   pickLikedSong,
+  proactiveLibrarySend,
+  loadSynthLibrary,
+  findSynthEntry,
   relayTargetText,
   hooks: {
     async 'chat.pre_reply'(input) {
@@ -1975,7 +2107,7 @@ module.exports = {
       }
       const relay = parseSongRelay(cleanText(message.text));
       if (relay && await handleSongRelay(whale, message, settings, relay)) return { action: 'skip' };
-      if (LIKED_ORDER.test(cleanText(message.text)) && (settings.onlyGroup !== true || message.chatType === 'group')) {
+      if (LIKED_ORDER.test(cleanText(message.text))) {
         await handleLikedOrder(whale, message, settings);
         return { action: 'skip' };
       }

@@ -91,9 +91,9 @@
     "Id": "breezeblue-sing",
     "Name": "Breezeblue 翻唱（本地发送器版）",
     "Author": "RacOrange",
-    "Version": "1.0.4",
+    "Version": "1.0.4.1",
     "MinAppVersion": "4.1.2",
-    "Description": "Windows 安装器 1.0.17 https://github.com/RacOrange/breezeblue-sing-installer/releases/tag/v1.0.17 群聊与私聊可点歌。本机渲染整首翻唱，按乐句停顿分段发微信语音。支持任选网易云喜欢曲目、闲时主动唱歌和已绑定主人确认的白名单代发。支持 WAV 附件的宿主可启用长歌格式选择。",
+    "Description": "Windows \u5b89\u88c5\u5668 1.0.18 https://github.com/RacOrange/breezeblue-sing-installer/releases/tag/v1.0.18 \u7fa4\u804a\u4e0e\u79c1\u804a\u53ef\u70b9\u6b4c\u3002\u672c\u673a\u6e32\u67d3\u6574\u9996\u7ffb\u5531\uff0c\u6309\u4e50\u53e5\u505c\u987f\u5206\u6bb5\u53d1\u5fae\u4fe1\u8bed\u97f3\u3002\u652f\u6301\u4efb\u9009\u7f51\u6613\u4e91\u559c\u6b22\u66f2\u76ee\u3001\u95f2\u65f6\u4e3b\u52a8\u5531\u6b4c\u3001\u5df2\u53d1\u9001\u6210\u54c1\u5e93\u590d\u7528\u548c\u767d\u540d\u5355\u4ee3\u53d1\uff1bA \u5361\u9700\u4f7f\u7528\u5b89\u88c5\u5668\u9644\u5e26\u7684 a-card DirectML \u5b9e\u9a8c\u5305\u3002",
     "ResultLabel": "翻唱语音",
     "Api": 4,
     "Kind": "message",
@@ -106,8 +106,8 @@
     ],
     "ExecutionTimeoutMs": 120000,
     "IntervalSeconds": 10,
-    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/breezeblue-sing-1.0.4.zip",
-    "Sha256": "def360a5ef3ca0a816baffbecf053a9c2842168a06b5221a02676798e7599452"
+    "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/breezeblue-sing-1.0.4.1.zip",
+    "Sha256": "0e96296394ff51a5ada98c00e58b593afc1b076c199f5cb4a9bc4ac68d13a6c5"
   },
   {
     "Id": "care-plus",

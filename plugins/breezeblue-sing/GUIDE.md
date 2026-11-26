@@ -2,7 +2,7 @@
 
 ## 1. 安装运行时和插件
 
-1. 准备 Windows x64、微信 PC 4.2、支持 Api 4 的鲸鲸，以及兼容的 NVIDIA 显卡。先关掉鲸鲸，再下载并解压 [Windows 运行时 1.0.17](https://github.com/RacOrange/breezeblue-sing-installer/releases/tag/v1.0.17)。
+1. 准备 Windows x64、微信 PC 4.2、支持 Api 4 的鲸鲸，以及兼容的 NVIDIA 显卡。先关掉鲸鲸，再下载并解压 [Windows 运行时 1.0.18](https://github.com/RacOrange/breezeblue-sing-installer/releases/tag/v1.0.18)。
 2. 双击 `Setup.cmd`，按提示选择安装盘和鲸鲸目录。第一次下载语音模型和显卡依赖可能较久。已有运行时也可按这个流程升级。安装器会把插件一并写入所选鲸鲸目录。首次遇到方案 B 时，如果鲸鲸还没启动或刚装虚拟声卡，先按回车留待稍后。
 3. 如果新装了 VB-CABLE，重启 Windows。进入声音设置，把输出改为 **CABLE Input**、输入改为 **CABLE Output**。微信麦克风使用系统默认设备，或者直接选 CABLE Output。
 4. 打开鲸鲸和微信，确认鲸鲸连接的是要唱歌的微信账号。打开「插件市场 → 已安装」，找到 **Breezeblue 翻唱**，启用并确认完整权限。升级后也需要重新确认。旧唱歌和旧独立主动唱歌插件可以先停用。找不到卡片时，关掉鲸鲸，在安装器目录运行 `install.cmd -OnlyStep plugin -ForceSteps plugin`，检查所选鲸鲸目录，完成后重新启动。
@@ -62,7 +62,7 @@ Invoke-RestMethod 'http://127.0.0.1:8787/api/wechat/contacts' |
 | 方案 B 没录到声音 | 检查鲸鲸语音开关、绑定账户、微信前台、CABLE Input 和 CABLE Output。然后单独补做参考音步骤。 |
 | 微信没出现语音条 | 确认微信窗口可用、目标会话名称可唯一匹配，以及录音设备为 CABLE Output。 |
 | 回执说结果不确定 | 先去目标会话核对是否已有语音条或文件。长歌按已确认段数停住，避免重复发送。 |
-| RTX 50 系列提示 CUDA 架构不支持 | 用 1.0.17 或更新安装器重跑依赖步骤。安装器会选择 cu128 并执行一次真实 GPU 算子检查。 |
+| RTX 50 系列提示 CUDA 架构不支持 | 用 1.0.18 或更新安装器重跑依赖步骤。安装器会选择 cu128 并执行一次真实 GPU 算子检查。 |
 | 长歌只看到分段语音 | 原版 4.1.8.2 的插件发送接口目前支持文字、TTS 语音和图片。整首 WAV 附件需要宿主提供附件发送能力。 |
 
-[完整设置字段](README.md#设置) · [配套运行时文档](https://github.com/RacOrange/breezeblue-sing-installer/blob/v1.0.17/README.md)
+[完整设置字段](README.md#设置) · [配套运行时文档](https://github.com/RacOrange/breezeblue-sing-installer/blob/v1.0.18/README.md)
