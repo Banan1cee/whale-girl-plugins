@@ -61,6 +61,7 @@
     ],
     "ExecutionTimeoutMs": 15000,
     "IntervalSeconds": 60,
+    "DiscussionIssue": 61,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/addressing-guard-1.0.2.zip",
     "Sha256": "93426faa363e0bce7a5475598c505f9b453d45842944bc3765c8f96402f60821"
   },
@@ -106,6 +107,7 @@
     ],
     "ExecutionTimeoutMs": 120000,
     "IntervalSeconds": 10,
+    "DiscussionIssue": 62,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/breezeblue-sing-1.0.4.1.zip",
     "Sha256": "4c2d3540b5b041c7c757e8f6bebb226455362232c27e89f7c5e480f8d9f8dadd"
   },
@@ -204,6 +206,7 @@
         "Description": "填写微信会话 ID，以逗号分隔。留空时所有会话沿用宿主规则。"
       }
     ],
+    "DiscussionIssue": 63,
     "Download": "https://raw.githubusercontent.com/Banan1cee/whale-girl-plugins/main/packages/quiet-group-1.0.0.zip",
     "Sha256": "4a2082c35d309dc23916c1e5997beb369e777b840259f1924f89d6e85144e3f4"
   },

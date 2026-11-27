@@ -1,5 +1,7 @@
 {
+  "addressing-guard": 61,
   "breeze-sing": 32,
+  "breezeblue-sing": 62,
   "care-plus": 33,
   "codebuddy-cli-model": 34,
   "context-notes": 35,
@@ -8,6 +10,7 @@
   "deepseek-whale-sister": 38,
   "followup-window": 39,
   "notes": 40,
+  "quiet-group": 63,
   "ruiping": 41,
   "ruiping-persona": 42,
   "smart-care": 43,
