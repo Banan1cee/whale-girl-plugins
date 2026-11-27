@@ -5,13 +5,16 @@ name: index
 #   · main：自动把生成结果提交回仓库，避免目录和包长期漂移。
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
       - 'plugins/**'
       - 'packages/**'
       - 'discussion-issues.json'
+      - '.github/workflows/index.yml'
       - 'scripts/build-index.js'
+      - 'scripts/sync-discussion-issues.js'
       - 'scripts/sync-package-release.js'
       - 'index*.json'
 
@@ -39,32 +42,57 @@ jobs:
           cd /tmp/market
           node scripts/build-index.js
           python validate.py
+          node --test scripts/sync-discussion-issues.test.js
 
   sync-catalog:
     name: 同步目录（main）
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      issues: write
+    concurrency:
+      group: market-catalog
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: 生成目录
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 生成并校验目录
+        run: |
+          node scripts/build-index.js
+          python validate.py
+      - name: 为已上架插件补讨论帖
+        id: discussions
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/sync-discussion-issues.js
+      - name: 写入讨论帖编号并重新生成目录
         run: node scripts/build-index.js
       - name: 有漂移就提交
         run: |
           set -euo pipefail
-          if git diff --quiet -- index*.json; then
+          if git diff --quiet -- discussion-issues.json index*.json; then
             echo '目录已同步，无需提交'
             exit 0
           fi
           git config user.name 'market-bot'
           git config user.email 'market-bot@users.noreply.github.com'
-          git add index*.json
-          git commit -m 'market: 自动同步目录（由 plugins/ 与 packages/ 生成）'
+          git add discussion-issues.json index*.json
+          git commit -m 'market: 自动同步目录和评论入口'
           git push
+      - name: 报告评论入口同步失败
+        if: steps.discussions.outcome == 'failure'
+        run: |
+          echo '::error::目录已同步，评论入口补齐失败。可在 main 上重新运行 index。'
+          exit 1
 
   sync-package-release:
     name: 同步用于下载统计的安装包（main）
