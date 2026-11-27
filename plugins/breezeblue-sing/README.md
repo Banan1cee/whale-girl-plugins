@@ -1,4 +1,4 @@
-# Breezeblue 翻唱 1.0.4
+# Breezeblue 翻唱 1.0.4.1
 
 鲸鲸 Api 4 消息插件。群聊和私聊可点歌、看歌单、撤单和播放当前会话的已有成品。本机 seed-vc 制作整首翻唱，通过 VB-CABLE 和微信前台录成语音。
 
@@ -6,7 +6,7 @@
 
 ## 安装与升级
 
-需要 Windows x64、微信 PC 4.2、支持 Api 4 的鲸鲸和兼容的 NVIDIA GPU。安装 [Windows 运行时 1.0.17](https://github.com/RacOrange/breezeblue-sing-installer/releases/tag/v1.0.17)。升级运行时会保留设置与模型。更新后在插件市场重新确认完整权限，并停用旧的同类唱歌插件。
+需要 Windows x64、微信 PC 4.2、支持 Api 4 的鲸鲸和兼容的 NVIDIA GPU。安装 [Windows 运行时 1.0.18](https://github.com/RacOrange/breezeblue-sing-installer/releases/tag/v1.0.18)。升级运行时会保留设置与模型。更新后在插件市场重新确认完整权限，并停用旧的同类唱歌插件。
 
 ## 设置
 
